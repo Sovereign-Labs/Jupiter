@@ -1,5 +1,5 @@
 [package]
-name = "sovereign-node"
+name = "jupiter"
 version = "0.1.0"
 edition = "2021"
 
@@ -27,3 +27,9 @@ base64 = "0.13.1"
 
 [build-dependencies]
 prost-build = { version = "0.11" }
+
+[patch.crates-io]
+# This version of tendermint is identical to the upstream
+# except that the crate::serializers::from_str annotation has been
+# removed from some integer fields, and #[serde(default)] has been added to Consensus.app
+tendermint = { path = "../tendermint-rs/tendermint" }
