@@ -121,11 +121,11 @@ pub enum TxType {
     Other(Tx),
 }
 
-pub fn get_pfds(height: u64) -> Result<Vec<MsgPayForData>, Box<dyn std::error::Error>> {
-    let e_tx_shares = get_namespace_data(height, [0, 0, 0, 0, 0, 0, 0, 1])?;
-    let pfds = parse_tx_namespace(e_tx_shares)?;
-    Ok(pfds)
-}
+// pub fn get_pfds(height: u64) -> Result<Vec<MsgPayForData>, Box<dyn std::error::Error>> {
+//     let e_tx_shares = get_namespace_data(height, [0, 0, 0, 0, 0, 0, 0, 1])?;
+//     let pfds = parse_tx_namespace(e_tx_shares)?;
+//     Ok(pfds)
+// }
 
 pub fn parse_tx_namespace(
     group: NamespaceGroup,
@@ -192,27 +192,27 @@ fn next_e_tx(
     Ok(None)
 }
 
-pub fn get_namespace_data(
-    height: u64,
-    namespace: [u8; 8],
-) -> Result<NamespaceGroup, Box<dyn std::error::Error>> {
-    let rpc_addr = format!(
-        "http://localhost:26659/namespaced_shares/{}/height/{}",
-        hex::encode(namespace),
-        height
-    );
+// pub fn get_namespace_data(
+//     height: u64,
+//     namespace: [u8; 8],
+// ) -> Result<NamespaceGroup, Box<dyn std::error::Error>> {
+//     let rpc_addr = format!(
+//         "http://localhost:26659/namespaced_shares/{}/height/{}",
+//         hex::encode(namespace),
+//         height
+//     );
 
-    let body = reqwest::blocking::get(rpc_addr)?.text()?;
-    let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
-    let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
-    Ok(shares)
-}
+//     let body = reqwest::blocking::get(rpc_addr)?.text()?;
+//     let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
+//     let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
+//     Ok(shares)
+// }
 
-pub fn get_header(height: u64) -> Result<tendermint::block::Header, Box<dyn std::error::Error>> {
-    let rpc_addr = format!("http://localhost:26659/headers/height/{}", height);
+// pub fn get_header(height: u64) -> Result<tendermint::block::Header, Box<dyn std::error::Error>> {
+//     let rpc_addr = format!("http://localhost:26659/header/{}", height);
 
-    let body = reqwest::blocking::get(rpc_addr)?.text()?;
-    let response: CelestiaHeaderResponse = serde_json::from_str(&body)?;
-    // let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
-    Ok(response.header)
-}
+//     let body = reqwest::blocking::get(rpc_addr)?.text()?;
+//     let response: CelestiaHeaderResponse = serde_json::from_str(&body)?;
+//     // let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
+//     Ok(response.header)
+// }

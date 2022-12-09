@@ -30,10 +30,10 @@ impl DaService for CelestiaService {
 
     fn get_finalized_at(height: usize) -> Self::Future<Self::FilteredBlock> {
         Box::pin(async move {
-            let rpc_addr = format!("http://localhost:26659/headers/height/{}", height);
+            let rpc_addr = format!("http://localhost:26659/header/{}", height);
             let raw_response = reqwest::get(rpc_addr).await?.text().await?;
             let header_response: CelestiaHeaderResponse = serde_json::from_str(&raw_response)?;
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
             let rpc_addr = format!(
                 "http://localhost:26659/namespaced_shares/{}/height/{}",
@@ -41,7 +41,7 @@ impl DaService for CelestiaService {
                 height
             );
 
-            let body = reqwest::blocking::get(rpc_addr)?.text()?;
+            let body = reqwest::get(rpc_addr).await?.text().await?;
             let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
             let rollup_shares = NamespaceGroup::from_b64_shares(&response.shares)?;
 
@@ -50,7 +50,7 @@ impl DaService for CelestiaService {
                 height
             );
 
-            let body = reqwest::blocking::get(rpc_addr)?.text()?;
+            let body = reqwest::get(rpc_addr).await?.text().await?;
             let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
             let tx_data = NamespaceGroup::from_b64_shares(&response.shares)?;
 
