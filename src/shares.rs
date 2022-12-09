@@ -6,7 +6,20 @@ use sovereign_sdk::{
     Bytes,
 };
 
-use crate::skip_varint;
+/// Skip over a varint. Returns the number of bytes read
+fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
+    // A varint may contain up to 10 bytes
+    for i in 0..10 {
+        // If the continuation bit is not set, we're done
+        if bytes.get_u8() < 0x80 {
+            return Ok(i + 1);
+        }
+    }
+    Err(ErrInvalidVarint)
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ErrInvalidVarint;
 
 /// The size of a share, in bytes
 const SHARE_SIZE: usize = 512;
@@ -15,6 +28,7 @@ const NAMESPACE_LEN: usize = 8;
 /// Value of maximum reserved namespace ID, as a big endian integer
 const MAX_RESERVED_NAMESPACE_ID: u64 = 255;
 
+#[derive(Debug, Clone, PartialEq)]
 /// A group of shares, in a single namespace
 pub enum NamespaceGroup {
     Compact(Vec<Share>),
@@ -186,6 +200,25 @@ impl NamespaceGroup {
         }
     }
 
+    pub fn from_b64_shares(encoded_shares: &Vec<String>) -> Result<Self, ShareParsingError> {
+        let mut shares = Vec::with_capacity(encoded_shares.len());
+        for share in encoded_shares {
+            let decoded_vec =
+                base64::decode(share).map_err(|_| ShareParsingError::ErrInvalidBase64)?;
+            if decoded_vec.len() != 512 {
+                return Err(ShareParsingError::ErrWrongLength);
+            }
+            let share = Share::new(decoded_vec.into());
+            shares.push(share)
+        }
+
+        let namespace = shares[0].namespace();
+        if u64::from_be_bytes(namespace) <= MAX_RESERVED_NAMESPACE_ID {
+            Ok(Self::Compact(shares))
+        } else {
+            Ok(Self::Sparse(shares))
+        }
+    }
     pub fn shares(&self) -> &Vec<Share> {
         match self {
             NamespaceGroup::Compact(shares) => shares,
@@ -200,20 +233,47 @@ impl NamespaceGroup {
         }
     }
 }
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct Blob<'a>(pub &'a [Share]);
+pub struct Blob(pub Vec<Share>);
 
-impl<'a> Blob<'a> {
-    pub fn with(shares: &'a [Share]) -> Self {
-        Self(shares)
+impl<'a> From<BlobRef<'a>> for Blob {
+    fn from(value: BlobRef<'a>) -> Self {
+        Self(value.0.iter().map(|s| s.clone()).collect())
     }
+}
 
-    pub fn data(&self) -> BlobIterator {
+impl IntoIterator for Blob {
+    type Item = u8;
+
+    type IntoIter = BlobIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
         let sequence_length = self.0[0]
             .sequence_length()
             .expect("blob must contain start share at idx 0");
         BlobIterator {
+            sequence_len: sequence_length as usize,
+            consumed: 0,
+            current: self.0[0].data(),
+            current_idx: 0,
+            blob: self,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlobRef<'a>(pub &'a [Share]);
+
+impl<'a> BlobRef<'a> {
+    pub fn with(shares: &'a [Share]) -> Self {
+        Self(shares)
+    }
+
+    pub fn data(&self) -> BlobRefIterator {
+        let sequence_length = self.0[0]
+            .sequence_length()
+            .expect("blob must contain start share at idx 0");
+        BlobRefIterator {
             sequence_len: sequence_length as usize,
             consumed: 0,
             current: self.0[0].data(),
@@ -223,7 +283,73 @@ impl<'a> Blob<'a> {
     }
 }
 
-pub struct BlobIterator<'a> {
+#[derive(Debug, Clone)]
+pub struct BlobIterator {
+    sequence_len: usize,
+    consumed: usize,
+    current: Bytes,
+    current_idx: usize,
+    blob: Blob,
+}
+
+impl Iterator for BlobIterator {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.consumed == self.sequence_len {
+            return None;
+        }
+        if self.current.has_remaining() {
+            self.consumed += 1;
+            return Some(self.current.get_u8());
+        }
+        self.current_idx += 1;
+        self.current = self.blob.0[self.current_idx].data();
+        self.next()
+    }
+}
+
+impl Buf for BlobIterator {
+    fn remaining(&self) -> usize {
+        self.sequence_len - self.consumed
+    }
+
+    fn chunk(&self) -> &[u8] {
+        let chunk = if self.current.has_remaining() {
+            self.current.as_ref()
+        } else {
+            // If the current share is exhasted, try to take the data from the next one
+            // if there is no next chunk, we're done. Return the empty slice.
+            if self.current_idx + 1 >= self.blob.0.len() {
+                return &[];
+            }
+            // Otherwise, take the next chunk
+            self.blob.0[self.current_idx + 1].data_ref()
+        };
+        // Chunks are zero-padded, so truncate if necessary
+        let remaining = self.remaining();
+        if chunk.len() > remaining {
+            return &chunk[..remaining];
+        }
+        chunk
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        self.consumed += cnt;
+        if self.current.remaining() > cnt {
+            self.current.advance(cnt);
+            return;
+        }
+
+        let next_cnt = cnt - self.current.remaining();
+        self.current_idx += 1;
+        self.current = self.blob.0[self.current_idx].data();
+        self.current.advance(next_cnt);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BlobRefIterator<'a> {
     sequence_len: usize,
     consumed: usize,
     current: Bytes,
@@ -231,7 +357,7 @@ pub struct BlobIterator<'a> {
     shares: &'a [Share],
 }
 
-impl<'a> Iterator for BlobIterator<'a> {
+impl<'a> Iterator for BlobRefIterator<'a> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -248,7 +374,7 @@ impl<'a> Iterator for BlobIterator<'a> {
     }
 }
 
-impl<'a> Buf for BlobIterator<'a> {
+impl<'a> Buf for BlobRefIterator<'a> {
     fn remaining(&self) -> usize {
         self.sequence_len - self.consumed
     }
@@ -293,7 +419,7 @@ pub struct NamespaceIterator<'a> {
 }
 
 impl<'a> std::iter::Iterator for NamespaceIterator<'a> {
-    type Item = Blob<'a>;
+    type Item = BlobRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.offset == self.shares.shares().len() {
@@ -302,25 +428,25 @@ impl<'a> std::iter::Iterator for NamespaceIterator<'a> {
         match self.shares {
             NamespaceGroup::Compact(shares) => {
                 self.offset = shares.len();
-                Some(Blob::with(shares))
+                Some(BlobRef::with(shares))
             }
             NamespaceGroup::Sparse(shares) => {
                 let start = self.offset;
                 self.offset += 1;
 
                 if self.offset == shares.len() {
-                    return Some(Blob::with(&shares[start..self.offset]));
+                    return Some(BlobRef::with(&shares[start..self.offset]));
                 }
 
                 for (idx, share) in shares[self.offset..].iter().enumerate() {
                     if share.is_sequence_start() {
                         self.offset += idx;
-                        return Some(Blob::with(&shares[start..self.offset]));
+                        return Some(BlobRef::with(&shares[start..self.offset]));
                     }
                 }
 
                 self.offset = shares.len();
-                return Some(Blob::with(&shares[start..self.offset]));
+                return Some(BlobRef::with(&shares[start..self.offset]));
             }
         }
         // let start = self.offset;

@@ -21,10 +21,18 @@ pub enum CommitmentError {
     ErrMessageTooLarge,
 }
 
+impl std::fmt::Display for CommitmentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ErrMessageTooLarge")
+    }
+}
+
+impl std::error::Error for CommitmentError {}
+
 /// Derived from https://github.com/celestiaorg/celestia-app/blob/0c81704939cd743937aac2859f3cb5ae6368f174/x/payment/types/payfordata.go#L170
 pub fn recreate_commitment(
     square_size: usize,
-    shares: shares::Blob,
+    shares: shares::BlobRef,
 ) -> Result<[u8; 32], CommitmentError> {
     if shares.0.len() > (square_size * square_size) - 1 {
         return Err(CommitmentError::ErrMessageTooLarge);
@@ -51,7 +59,6 @@ pub fn recreate_commitment(
 
         subtree_roots.push(build_nmt_from_po2_leaves(&modified_set));
     }
-    dbg!(&subtree_roots);
     let h = simple_hash_from_byte_vectors(
         subtree_roots
             .into_iter()
@@ -135,7 +142,6 @@ mod nmt {
             root[8..16].copy_from_slice(&leaves[0].as_ref()[..8]);
 
             root[16..].copy_from_slice(sha2_merkle(&[0], leaves[0].as_ref()).as_ref());
-            dbg!(&root[16..]);
             return root;
         }
         let mut out = Vec::with_capacity(leaves.len() / 2);
