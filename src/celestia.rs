@@ -1,44 +1,72 @@
 use std::io::Cursor;
 
 use hex_literal::hex;
-use prost::bytes::Buf;
+use prost::{bytes::Buf, encoding::decode_varint, Message};
 use serde::{Deserialize, Serialize};
-use sovereign_sdk::core::traits::{Address, Blockheader, CanonicalHash};
+use sovereign_sdk::{
+    core::traits::{Address, Blockheader, CanonicalHash},
+    Bytes,
+};
 
-use crate::{MalleatedTx, Tx};
+use crate::{
+    da_app::CelestiaAddress,
+    payment::MsgPayForData,
+    shares::{Blob, NamespaceGroup},
+    MalleatedTx, Tx,
+};
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct CelestiaHeaderResponse {
-    header: CelestiaHeader,
+    pub header: tendermint::block::Header,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-/// The minimal portion of a celestia header required for DA verification
-pub struct CelestiaHeader {
-    pub version: CelestiaVersion,
-    pub chain_id: String,
+pub struct NamespacedSharesResponse {
+    pub shares: Vec<String>,
     pub height: u64,
-    pub time: String, // TODO: Make this an actual time
-    pub last_block_id: PreviousBlock,
-    pub last_commit_hash: Sha2Hash,
-    pub data_hash: Sha2Hash,
-    pub consensus_hash: Sha2Hash,
-    pub app_hash: Sha2Hash,
 }
 
-impl Blockheader for CelestiaHeader {
-    type Hash = Sha2Hash;
+// #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+// /// The minimal portion of a celestia header required for DA verification
+// pub struct CelestiaHeader {
+//     pub version: CelestiaVersion,
+//     pub chain_id: String,
+//     pub height: u64,
+//     pub time: String, // TODO: Make this an actual time
+//     pub last_block_id: PreviousBlock,
+//     pub last_commit_hash: Sha2Hash,
+//     pub data_hash: Sha2Hash,
+//     pub consensus_hash: Sha2Hash,
+//     pub app_hash: Sha2Hash,
+// }
 
-    fn prev_hash(&self) -> &Self::Hash {
-        &self.last_block_id.hash
+#[derive(Debug, PartialEq)]
+pub struct CelestiaHeader(pub tendermint::block::Header);
+
+impl CanonicalHash for CelestiaHeader {
+    type Output = tendermint::Hash;
+
+    fn hash(&self) -> Self::Output {
+        self.0.hash()
     }
 }
 
-impl CanonicalHash for CelestiaHeader {
-    type Output = Sha2Hash;
+#[derive(PartialEq, Clone, Debug)]
+pub struct BlobWithSender {
+    pub blob: Blob,
+    pub sender: CelestiaAddress,
+}
 
-    fn hash(&self) -> Self::Output {
-        todo!()
+impl Blockheader for CelestiaHeader {
+    type Hash = tendermint::Hash;
+
+    fn prev_hash(&self) -> &Self::Hash {
+        &self
+            .0
+            .last_block_id
+            .as_ref()
+            .expect("must not call prev_hash on block with no predecessor")
+            .hash
     }
 }
 
@@ -87,98 +115,104 @@ impl<'a> TryFrom<&'a [u8]> for H160 {
 }
 impl Address for H160 {}
 
-// pub fn skip_share_header(mut bytes: impl Buf) {
-//     // Skip the namespace id
-//     bytes.advance(8);
-//     // Read the info byte
-//     let info = bytes.get_u8();
-//     let is_sequence_start = info & 0x01 == 1;
-//     if is_sequence_start {
-//         // // Skip sequence length
-//         // let used_seq_len = skip_varint(&mut bytes).expect("encoding must be valid");
-//         // if used_seq_len < 2 {
-//         //     bytes.advance(2 - used_seq_len)
-//         // }
-//         bytes.advance(4);
-//     }
-//     // Skip reserved bytes
-//     bytes.advance(2);
-//     // skip_varint(&mut bytes).expect("encoding must be valid");
-//     // skip the length field
-//     skip_varint(bytes).expect("encoding must be valid");
-// }
-
-pub fn skip_compact_share_header(mut bytes: impl Buf) {
-    // Skip the namespace id
-    bytes.advance(8);
-    // Read the info byte
-    let info = bytes.get_u8();
-    let is_sequence_start = info & 0x01 == 1;
-    if is_sequence_start {
-        // Skip sequence length
-        // bytes.advance(4);
-    }
-    // Skip reserved bytes
-    bytes.advance(2);
-}
-
-pub fn test_compact_share_parsing(mut bytes: impl Buf) {
-    skip_compact_share_header(&mut bytes);
-
-    // read the length field
-    let (tx_len, _) = decode_varint(bytes)
-        .expect("encoding must be valid")
-        .unwrap();
-
-    println!("Tx len was {}", tx_len);
-    if tx_len >= 490 {
-        panic!("Tx len was larger than expected: {}", tx_len)
-    }
-}
-
-/// Skip over a varint. Returns the number of bytes read
-pub fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
-    // A varint may contain up to 10 bytes
-    for i in 0..10 {
-        // If the continuation bit is not set, we're done
-        if bytes.get_u8() < 0x80 {
-            return Ok(i + 1);
-        }
-    }
-    Err(ErrInvalidVarint)
-}
-
-#[derive(Debug, PartialEq)]
-pub struct ErrInvalidVarint;
-
-pub fn decode_varint(mut rem: impl Buf) -> Result<Option<(u64, usize)>, ErrInvalidVarint> {
-    if !rem.has_remaining() {
-        return Ok(None);
-    }
-    let mut r: u64 = 0;
-    for i in 0..9 {
-        let b = rem.get_u8();
-        r = r | (((b & 0x7f) as u64) << (i as u64 * 7));
-        if b < 0x80 {
-            return Ok(Some((r, i + 1)));
-        }
-    }
-    let b = rem.get_u8();
-    // By this point, we've parsed 63 bits, so only the lsb of the remaining byte may be set
-    if b > 1 {
-        return Err(ErrInvalidVarint);
-    }
-    r |= (b as u64) << 63;
-    Ok(Some((r, 10)))
-}
-
-#[test]
-fn test_decode_varint() {
-    assert_eq!(decode_varint(Cursor::new(hex!("9601"))), Ok(Some((150, 2))))
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum TxType {
     Pfd(MalleatedTx),
     Other(Tx),
+}
+
+pub fn get_pfds(height: u64) -> Result<Vec<MsgPayForData>, Box<dyn std::error::Error>> {
+    let e_tx_shares = get_namespace_data(height, [0, 0, 0, 0, 0, 0, 0, 1])?;
+    let pfds = parse_tx_namespace(e_tx_shares)?;
+    Ok(pfds)
+}
+
+pub fn parse_tx_namespace(
+    group: NamespaceGroup,
+) -> Result<Vec<MsgPayForData>, Box<dyn std::error::Error>> {
+    if group.shares().len() == 0 {
+        return Ok(vec![]);
+    }
+    assert!(group.shares()[0].namespace() == [0u8, 0, 0, 0, 0, 0, 0, 1]);
+    let mut pfbs = Vec::new();
+    for blob in group.blobs() {
+        let data: Vec<u8> = blob.data().collect();
+        println!("Total Data length: {}", data.len());
+
+        let mut data = std::io::Cursor::new(data);
+        while data.has_remaining() {
+            if let Some(tx) = next_e_tx(&mut data)? {
+                pfbs.push(tx)
+            }
+        }
+        // assert_eq!(data_from_node, data);
+    }
+    Ok(pfbs)
+}
+
+fn next_e_tx(
+    mut data: &mut std::io::Cursor<Vec<u8>>,
+) -> Result<Option<MsgPayForData>, Box<dyn std::error::Error>> {
+    let len = decode_varint(&mut data).expect("Varint must be valid");
+    dbg!("Found tx with", len);
+    let backup = data.position();
+    let tx = match MalleatedTx::decode(&mut data) {
+        Ok(malleated) => {
+            // The hash length must be 32
+            if malleated.original_tx_hash.len() != 32 {
+                data.set_position(backup);
+                TxType::Other(Tx::decode(data)?)
+            } else {
+                TxType::Pfd(malleated)
+            }
+        }
+        Err(_) => {
+            data.set_position(backup);
+            TxType::Other(Tx::decode(data)?)
+        }
+    };
+
+    let sdk_tx = match tx {
+        TxType::Pfd(malleated) => {
+            let inner = malleated.tx.clone();
+            Tx::decode(inner)?
+        }
+        TxType::Other(tx) => tx,
+    };
+
+    let body = sdk_tx.body.expect("transaction must have body");
+    if body.messages.len() == 1 {
+        for msg in body.messages {
+            if msg.type_url == "/payment.MsgPayForData" {
+                let pfd = MsgPayForData::decode(std::io::Cursor::new(msg.value))?;
+                return Ok(Some(pfd));
+            }
+        }
+    }
+    Ok(None)
+}
+
+pub fn get_namespace_data(
+    height: u64,
+    namespace: [u8; 8],
+) -> Result<NamespaceGroup, Box<dyn std::error::Error>> {
+    let rpc_addr = format!(
+        "http://localhost:26659/namespaced_shares/{}/height/{}",
+        hex::encode(namespace),
+        height
+    );
+
+    let body = reqwest::blocking::get(rpc_addr)?.text()?;
+    let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
+    let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
+    Ok(shares)
+}
+
+pub fn get_header(height: u64) -> Result<tendermint::block::Header, Box<dyn std::error::Error>> {
+    let rpc_addr = format!("http://localhost:26659/headers/height/{}", height);
+
+    let body = reqwest::blocking::get(rpc_addr)?.text()?;
+    let response: CelestiaHeaderResponse = serde_json::from_str(&body)?;
+    // let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
+    Ok(response.header)
 }
