@@ -25,6 +25,8 @@ hex = { version = "0.4.3", features = ["serde"] }
 hex-literal = "0.3.4"
 base64 = "0.13.1"
 
+nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git" }
+
 [build-dependencies]
 prost-build = { version = "0.11" }
 
@@ -32,4 +34,4 @@ prost-build = { version = "0.11" }
 # This version of tendermint is identical to the upstream
 # except that the crate::serializers::from_str annotation has been
 # removed from some integer fields, and #[serde(default)] has been added to Consensus.app
-tendermint = { path = "../tendermint-rs/tendermint" }
+# tendermint = { path = "../tendermint-rs/tendermint" }

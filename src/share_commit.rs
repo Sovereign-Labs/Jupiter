@@ -1,6 +1,6 @@
 use crate::shares::{self, Share};
 
-use self::nmt::build_nmt_from_po2_leaves;
+use self::nmt::build_nmt_from_namespaced_leaves;
 
 use tendermint::merkle::simple_hash_from_byte_vectors;
 
@@ -53,11 +53,10 @@ pub fn recreate_commitment(
             let mut prefixed = [0u8; 520];
             prefixed[..8].copy_from_slice(&share.as_ref()[..8]);
             prefixed[8..].copy_from_slice(share.as_ref());
-            println!("nsleaf {:?}", &prefixed);
             modified_set.push(prefixed);
         }
 
-        subtree_roots.push(build_nmt_from_po2_leaves(&modified_set));
+        subtree_roots.push(build_nmt_from_namespaced_leaves(&modified_set));
     }
     let h = simple_hash_from_byte_vectors(
         subtree_roots
@@ -101,85 +100,16 @@ fn next_lower_power_of_2(num: usize) -> usize {
 }
 
 mod nmt {
-    use std::cmp::{max, min};
-
-    use sovereign_sdk::core::crypto::hash::{sha2, sha2_merkle, Sha2Hash};
-
-    #[derive(Debug, Copy, Clone, PartialEq)]
-    pub enum Node<'a> {
-        Leaf(&'a [u8]),
-        Internal(&'a [u8]),
-    }
-
-    impl<'a> AsRef<[u8]> for Node<'a> {
-        fn as_ref(&self) -> &[u8] {
-            match self {
-                Node::Leaf(x) => x,
-                Node::Internal(x) => x,
-            }
+    use nmt_rs::{MemDb, NamespaceId, NamespaceMerkleTree};
+    pub fn build_nmt_from_namespaced_leaves(namespaced_leaves: &[impl AsRef<[u8]>]) -> [u8; 48] {
+        let mut tree = NamespaceMerkleTree::<MemDb>::new();
+        for leaf in namespaced_leaves.iter() {
+            let namespace: NamespaceId = leaf.as_ref()[..8]
+                .as_ref()
+                .try_into()
+                .expect("Namespace length is correct");
+            tree.push_leaf(&leaf.as_ref()[8..], namespace)
         }
-    }
-
-    impl<'a> Node<'a> {
-        pub fn low_namespace(&self) -> &[u8] {
-            match self {
-                Node::Leaf(inner) => &inner[..8],
-                Node::Internal(inner) => &inner[..8],
-            }
-        }
-        pub fn high_namespace(&self) -> &[u8] {
-            match self {
-                Node::Leaf(inner) => &inner[..8],
-                Node::Internal(inner) => &inner[8..16],
-            }
-        }
-    }
-
-    pub fn build_nmt_from_po2_leaves(leaves: &[impl AsRef<[u8]>]) -> [u8; 48] {
-        if leaves.len() == 1 {
-            let mut root = [0u8; 48];
-            root[..8].copy_from_slice(&leaves[0].as_ref()[..8]);
-            root[8..16].copy_from_slice(&leaves[0].as_ref()[..8]);
-
-            root[16..].copy_from_slice(sha2_merkle(&[0], leaves[0].as_ref()).as_ref());
-            return root;
-        }
-        let mut out = Vec::with_capacity(leaves.len() / 2);
-        for [l, r] in leaves.array_chunks::<2>() {
-            let left = Node::Leaf(l.as_ref());
-            let right = Node::Leaf(r.as_ref());
-
-            let mut root = [0u8; 48];
-            root[..8].copy_from_slice(min(left.low_namespace(), right.low_namespace()));
-            root[8..16].copy_from_slice(max(left.high_namespace(), right.high_namespace()));
-
-            root[16..].copy_from_slice(sha2_merkle(left.as_ref(), right.as_ref()).as_ref());
-            out.push(root)
-        }
-        if out.len() == 1 {
-            return out[0];
-        }
-        return build_nmt_from_po2_inners(out);
-    }
-
-    fn build_nmt_from_po2_inners(inners: Vec<[u8; 48]>) -> [u8; 48] {
-        todo!()
-        // dbg!("Building nmt from inners with len", inners.len());
-        // let mut out = Vec::with_capacity(inners.len() / 2);
-        // for [l, r] in inners.array_chunks::<2>() {
-        //     let left = Node::Internal(l);
-        //     let right = Node::Internal(r);
-
-        //     let mut root = [0u8; 48];
-        //     root[..8].copy_from_slice(min(left.low_namespace(), right.low_namespace()));
-        //     root[8..16].copy_from_slice(max(left.high_namespace(), right.high_namespace()));
-
-        //     root[16..].copy_from_slice(sha2_merkle(left.as_ref(), right.as_ref()).as_ref());
-        //     out.push(root)
-        // }
-        // if out.len() == 1 {
-        //     return sha2(out[0].as_ref());
-        // }
-        // return build_nmt_from_po2_inners(out);
+        tree.root().0
     }
 }
