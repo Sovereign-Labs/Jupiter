@@ -1,12 +1,9 @@
-use std::io::Cursor;
-
-use hex_literal::hex;
+use nmt_rs::NamespacedHash;
 use prost::{bytes::Buf, encoding::decode_varint, Message};
 use serde::{Deserialize, Serialize};
-use sovereign_sdk::{
-    core::traits::{Address, Blockheader, CanonicalHash},
-    Bytes,
-};
+use sovereign_sdk::core::traits::{Address, Blockheader, CanonicalHash};
+
+const NAMESPACED_HASH_LEN: usize = 48;
 
 use crate::{
     da_app::CelestiaAddress,
@@ -16,8 +13,47 @@ use crate::{
 };
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct MarshalledDataAvailabilityHeader {
+    pub row_roots: Vec<String>,
+    pub column_roots: Vec<String>,
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct DataAvailabilityHeader {
+    pub row_roots: Vec<NamespacedHash>,
+    pub column_roots: Vec<NamespacedHash>,
+}
+
+// Danger! This method panics if the provided bas64 is longer than a namespaced hash
+fn decode_to_ns_hash(b64: &str) -> Result<NamespacedHash, base64::DecodeError> {
+    let mut out = [0u8; NAMESPACED_HASH_LEN];
+    base64::decode_config_slice(b64, base64::STANDARD, &mut out)?;
+    Ok(NamespacedHash(out))
+}
+
+impl TryFrom<MarshalledDataAvailabilityHeader> for DataAvailabilityHeader {
+    type Error = base64::DecodeError;
+
+    fn try_from(value: MarshalledDataAvailabilityHeader) -> Result<Self, Self::Error> {
+        let mut row_roots = Vec::with_capacity(value.row_roots.len());
+        for root in value.row_roots {
+            row_roots.push(decode_to_ns_hash(&root)?);
+        }
+        let mut column_roots = Vec::with_capacity(value.column_roots.len());
+        for root in value.column_roots {
+            column_roots.push(decode_to_ns_hash(&root)?);
+        }
+        Ok(Self {
+            row_roots,
+            column_roots,
+        })
+    }
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct CelestiaHeaderResponse {
     pub header: tendermint::block::Header,
+    pub dah: MarshalledDataAvailabilityHeader,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
@@ -40,14 +76,18 @@ pub struct NamespacedSharesResponse {
 //     pub app_hash: Sha2Hash,
 // }
 
-#[derive(Debug, PartialEq)]
-pub struct CelestiaHeader(pub tendermint::block::Header);
+#[derive(Debug, PartialEq, Clone)]
+
+pub struct CelestiaHeader {
+    pub dah: DataAvailabilityHeader,
+    pub header: tendermint::block::Header,
+}
 
 impl CanonicalHash for CelestiaHeader {
     type Output = tendermint::Hash;
 
     fn hash(&self) -> Self::Output {
-        self.0.hash()
+        self.header.hash()
     }
 }
 
@@ -62,7 +102,7 @@ impl Blockheader for CelestiaHeader {
 
     fn prev_hash(&self) -> &Self::Hash {
         &self
-            .0
+            .header
             .last_block_id
             .as_ref()
             .expect("must not call prev_hash on block with no predecessor")
