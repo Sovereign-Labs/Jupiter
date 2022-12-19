@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
+use nmt_rs::{db::MemDb, NamespaceMerkleTree};
 use sovereign_sdk::{
     core::traits::Address,
     da::{self, TxWithSender},
     Bytes,
 };
+use tendermint::merkle;
 
 use crate::{
-    da_service::FilteredCelestiaBlock,
+    da_service::{FilteredCelestiaBlock, ValidationError, ROLLUP_NAMESPACE},
     share_commit::recreate_commitment,
     shares::{Blob, BlobIterator, BlobRefIterator},
     BlobWithSender, CelestiaHeader, Sha2Hash, H160,
@@ -60,9 +62,9 @@ impl da::DaApp for Celestia {
 
     type InclusionMultiProof = ();
 
-    type CompletenessProof = ();
+    type CompletenessProof = Vec<RelevantRowProof>;
 
-    type Error = ();
+    type Error = ValidationError;
 
     const ADDRESS_LENGTH: usize = 20;
 
@@ -79,6 +81,7 @@ impl da::DaApp for Celestia {
         let mut output = Vec::new();
         for blob in filtered_block.rollup_data.blobs() {
             let commitment = recreate_commitment(4, blob.clone()).expect("blob must be valid");
+            println!("Successfully recreated commitment");
             let sender = filtered_block
                 .relevant_txs
                 .get(&commitment[..])
@@ -103,7 +106,37 @@ impl da::DaApp for Celestia {
         Self::InclusionMultiProof,
         Self::CompletenessProof,
     ) {
-        todo!()
+        let relevant_txs = self.get_relevant_txs(blockhash);
+
+        let filtered_block = self
+            .db
+            .get(blockhash)
+            .expect("Must only call get txs on extant blocks");
+
+        let mut relevant_rows = filtered_block.relevant_rows.iter();
+
+        let mut row_proofs = Vec::new();
+        for row_root in filtered_block.header.dah.row_roots.iter() {
+            if row_root.contains(ROLLUP_NAMESPACE) {
+                let mut nmt = NamespaceMerkleTree::<MemDb>::new();
+                let next_row = relevant_rows
+                    .next()
+                    .expect("All relevant rows must be present");
+                assert!(row_root == &next_row.root);
+                for share in &next_row.row {
+                    nmt.push_leaf(share.as_ref(), ROLLUP_NAMESPACE)
+                        .expect("shares are pushed in order");
+                }
+                assert_eq!(&nmt.root(), row_root);
+                let (leaves, proof) = nmt.get_namespace_with_proof(ROLLUP_NAMESPACE);
+                let row_proof = RelevantRowProof { leaves, proof };
+                row_proofs.push(row_proof)
+            }
+        }
+
+        assert!(filtered_block.header.validate_dah().is_ok());
+
+        (relevant_txs, (), row_proofs)
     }
 
     fn verify_relevant_tx_list(
@@ -113,6 +146,31 @@ impl da::DaApp for Celestia {
         inclusion_proof: &Self::InclusionMultiProof,
         completeness_proof: &Self::CompletenessProof,
     ) -> Result<(), Self::Error> {
+        // Check the completeness of the provided blob txs
+        blockheader.validate_dah()?;
+        let mut relevant_row_proofs = completeness_proof.iter();
+        for row_root in blockheader.dah.row_roots.iter() {
+            if row_root.contains(ROLLUP_NAMESPACE) {
+                let row_proof = relevant_row_proofs
+                    .next()
+                    .expect("All proofs must be present");
+                row_proof
+                    .proof
+                    .clone()
+                    .verify(row_root, &row_proof.leaves, ROLLUP_NAMESPACE)
+                    .expect("Proofs must be valid");
+            }
+        }
+
+        // Check the correctness of the sender field
+        // TODO(@preston-evans98): Remove this logic if Celestia adds blob.sender metadata directly into blob
         todo!()
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+
+pub struct RelevantRowProof {
+    leaves: Vec<Vec<u8>>,
+    proof: nmt_rs::Proof,
 }
