@@ -2,6 +2,7 @@ use crate::shares::{self, Share};
 
 use self::nmt::build_nmt_from_namespaced_leaves;
 
+use nmt_rs::{db::MemDb, NamespaceId};
 use tendermint::merkle::simple_hash_from_byte_vectors;
 
 /// Calculates the size of the smallest square that could be used to commit
@@ -48,15 +49,14 @@ pub fn recreate_commitment(
 
     let mut subtree_roots = Vec::with_capacity(leaf_sets.len());
     for set in leaf_sets {
-        let mut modified_set = Vec::new();
+        let mut tree = nmt_rs::NamespaceMerkleTree::<MemDb>::new();
         for share in set {
-            let mut prefixed = [0u8; 520];
-            prefixed[..8].copy_from_slice(&share.as_ref()[..8]);
-            prefixed[8..].copy_from_slice(share.as_ref());
-            modified_set.push(prefixed);
+            let nid = NamespaceId(share.as_ref()[..8].try_into().unwrap());
+            tree.push_leaf(share.as_ref(), nid)
+                .expect("Leaves are pushed in order");
         }
 
-        subtree_roots.push(build_nmt_from_namespaced_leaves(&modified_set));
+        subtree_roots.push(tree.root());
     }
     let h = simple_hash_from_byte_vectors(
         subtree_roots
@@ -100,7 +100,8 @@ fn next_lower_power_of_2(num: usize) -> usize {
 }
 
 mod nmt {
-    use nmt_rs::{MemDb, NamespaceId, NamespaceMerkleTree};
+    use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree};
+    /// Build an nmt from leaves that are already prefixed with their namespace
     pub fn build_nmt_from_namespaced_leaves(namespaced_leaves: &[impl AsRef<[u8]>]) -> [u8; 48] {
         let mut tree = NamespaceMerkleTree::<MemDb>::new();
         for leaf in namespaced_leaves.iter() {
@@ -109,7 +110,17 @@ mod nmt {
                 .try_into()
                 .expect("Namespace length is correct");
             tree.push_leaf(&leaf.as_ref()[8..], namespace)
+                .expect("Leaves are pushed in order");
         }
+        tree.root().0
+    }
+
+    pub fn build_nmt(leaves: &[(impl AsRef<[u8]>, NamespaceId)]) -> [u8; 48] {
+        let mut tree = NamespaceMerkleTree::<MemDb>::new();
+        for (leaf, ns) in leaves {
+            tree.push_leaf(leaf.as_ref(), *ns);
+        }
+
         tree.root().0
     }
 }
