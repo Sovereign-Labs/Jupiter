@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use prost::{bytes::Buf, encoding::decode_varint};
+use serde::{de::Error, Deserialize};
 use sovereign_sdk::{
     core::crypto::hash::{sha2, Sha2Hash},
     Bytes,
@@ -39,6 +40,23 @@ pub enum NamespaceGroup {
 pub enum Share {
     Continuation(Bytes),
     Start(Bytes),
+}
+
+impl<'de> Deserialize<'de> for Share {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let share = Bytes::deserialize(deserializer)?;
+        if share.len() != SHARE_SIZE {
+            // let expected = Unexpected::Bytes(&share);
+            return Err(Error::invalid_length(share.len(), &"A share of length 512"));
+        }
+        if is_continuation_unchecked(share.as_ref()) {
+            return Ok(Share::Continuation(share));
+        }
+        Ok(Share::Start(share))
+    }
 }
 
 impl AsRef<[u8]> for Share {
