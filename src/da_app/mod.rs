@@ -139,7 +139,7 @@ impl da::DaApp for CelestiaApp {
                     // Shares in the two left-hand quadrants are prefixed with their namespace, while parity
                     // shares (in the right-hand) quadrants always have the PARITY_SHARES_NAMESPACE
                     let namespace = if idx < next_row.row.len() / 2 {
-                        NamespaceId(share.namespace())
+                        share.namespace()
                     } else {
                         PARITY_SHARES_NAMESPACE
                     };

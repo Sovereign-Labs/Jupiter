@@ -49,7 +49,7 @@ pub fn recreate_commitment(
     for set in leaf_sets {
         let mut tree = nmt_rs::NamespaceMerkleTree::<MemDb>::new();
         for share in set {
-            let nid = NamespaceId(share.namespace());
+            let nid = share.namespace();
             tree.push_leaf(share.as_serialized(), nid)
                 .expect("Leaves are pushed in order");
         }

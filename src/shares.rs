@@ -41,10 +41,6 @@ pub struct ErrInvalidVarint;
 const SHARE_SIZE: usize = 512;
 /// The size of base64 encoded share, in bytes
 const B64_SHARE_SIZE: usize = 684;
-/// The length of a namespace, in bytes,
-const NAMESPACE_LEN: usize = 8;
-/// Value of maximum reserved namespace ID, as a big endian integer
-const MAX_RESERVED_NAMESPACE_ID: u64 = 255;
 
 #[derive(Debug, Clone, PartialEq)]
 /// A group of shares, in a single namespace
@@ -82,12 +78,6 @@ impl<'de> Deserialize<'de> for Share {
         Ok(Share::Start(share))
     }
 }
-
-// impl AsRef<[u8]> for Share {
-//     fn as_ref(&self) -> &[u8] {
-//         self.raw_inner_ref()
-//     }
-// }
 
 fn is_continuation_unchecked(share: &[u8]) -> bool {
     share[8] & 0x01 == 0
@@ -169,7 +159,7 @@ impl Share {
         // All shares are prefixed with metadata including the namespace (8 bytes), and info byte (1 byte)
         let mut offset = 8 + 1;
         // Compact shares (shares in reserved namespaces) are prefixed with 2 reserved bytes
-        if u64::from_be_bytes(self.namespace()) <= 255 {
+        if self.namespace().is_reserved() {
             offset += 2;
             // Start shares in compact namespaces are also prefixed with a sequence length, which
             // is zero padded to fill four bytes
@@ -200,14 +190,14 @@ impl Share {
     }
 
     /// Get the namespace associated with this share
-    pub fn namespace(&self) -> [u8; NAMESPACE_LEN] {
+    pub fn namespace(&self) -> NamespaceId {
         let mut out = [0u8; 8];
         out.copy_from_slice(&self.raw_inner_ref()[..8]);
-        out
+        NamespaceId(out)
     }
 
     pub fn is_valid_tx_start(&self, idx: usize) -> bool {
-        if NamespaceId(self.namespace()) != TRANSACTIONS_NAMESPACE {
+        if self.namespace() != TRANSACTIONS_NAMESPACE {
             return false;
         }
         let mut next_legal_start_offset = self.offset_of_first_tx_unchecked();
@@ -267,8 +257,7 @@ impl NamespaceGroup {
         shares.push(Share::new(output));
         // Check whether these shares come from a reserved (compact) namespace
 
-        let namespace = shares[0].namespace();
-        if u64::from_be_bytes(namespace) <= MAX_RESERVED_NAMESPACE_ID {
+        if shares[0].namespace().is_reserved() {
             Ok(Self::Compact(shares))
         } else {
             Ok(Self::Sparse(shares))
@@ -290,8 +279,7 @@ impl NamespaceGroup {
             shares.push(share)
         }
 
-        let namespace = shares[0].namespace();
-        if u64::from_be_bytes(namespace) <= MAX_RESERVED_NAMESPACE_ID {
+        if shares[0].namespace().is_reserved() {
             Ok(Self::Compact(shares))
         } else {
             Ok(Self::Sparse(shares))
@@ -305,8 +293,7 @@ impl NamespaceGroup {
             .map(|share| Share::new(Bytes::from(share)))
             .collect();
 
-        let namespace = shares[0].namespace();
-        if u64::from_be_bytes(namespace) <= MAX_RESERVED_NAMESPACE_ID {
+        if shares[0].namespace().is_reserved() {
             Self::Compact(shares)
         } else {
             Self::Sparse(shares)

@@ -9,6 +9,7 @@ const NAMESPACED_HASH_LEN: usize = 48;
 
 use crate::{
     da_app::address::CelestiaAddress,
+    da_service::TRANSACTIONS_NAMESPACE,
     payment::MsgPayForData,
     shares::{Blob, BlobRefIterator, NamespaceGroup},
     MalleatedTx, Tx,
@@ -160,7 +161,7 @@ pub fn parse_tx_namespace(
     if group.shares().len() == 0 {
         return Ok(vec![]);
     }
-    assert!(group.shares()[0].namespace() == [0u8, 0, 0, 0, 0, 0, 0, 1]);
+    assert!(group.shares()[0].namespace() == TRANSACTIONS_NAMESPACE);
     let mut pfbs = Vec::new();
     for blob in group.blobs() {
         let mut data = blob.data();
