@@ -30,6 +30,12 @@ pub struct FilteredCelestiaBlock {
     pub relevant_rows: Vec<RelevantRow>,
 }
 
+impl FilteredCelestiaBlock {
+    pub fn square_size(&self) -> usize {
+        self.header.square_size()
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ValidationError {
     MissingDataHash,

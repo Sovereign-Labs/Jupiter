@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use base64::STANDARD;
+use nmt_rs::NamespaceId;
 use prost::{
     bytes::{Buf, BytesMut},
     encoding::decode_varint,
@@ -11,6 +12,8 @@ use sovereign_sdk::{
     core::crypto::hash::{sha2, Sha2Hash},
     Bytes,
 };
+
+use crate::da_service::TRANSACTIONS_NAMESPACE;
 
 /// Skip over a varint. Returns the number of bytes read
 pub fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
@@ -80,11 +83,11 @@ impl<'de> Deserialize<'de> for Share {
     }
 }
 
-impl AsRef<[u8]> for Share {
-    fn as_ref(&self) -> &[u8] {
-        self.raw_inner_ref()
-    }
-}
+// impl AsRef<[u8]> for Share {
+//     fn as_ref(&self) -> &[u8] {
+//         self.raw_inner_ref()
+//     }
+// }
 
 fn is_continuation_unchecked(share: &[u8]) -> bool {
     share[8] & 0x01 == 0
@@ -108,6 +111,10 @@ impl Share {
         } else {
             Self::Start(inner)
         }
+    }
+
+    pub fn as_serialized(&self) -> &[u8] {
+        self.raw_inner_ref()
     }
 
     pub fn is_sequence_start(&self) -> bool {
@@ -148,13 +155,14 @@ impl Share {
         sha2(self.raw_inner_ref())
     }
 
-    /// returns the reserved bytes of this share, assuming that it's a
-    /// compact share. if this is a sparse share, this function will return garbage
-    /// and may panic
-    pub fn get_reserved_bytes_unchecked(&self) -> u64 {
+    /// Returns the offset *into the data portion* of this share at which
+    /// the first tx begins. So, for example, if this share is the start of a sequence,
+    /// the returned offset will be 0.
+    fn offset_of_first_tx_unchecked(&self) -> usize {
         let offset = self.get_data_offset() - 2;
         decode_varint(&mut std::io::Cursor::new(&self.raw_inner_ref()[offset..]))
-            .expect("reserved bytes must be valid varint")
+            .expect("reserved bytes must be valid varint") as usize
+            - self.get_data_offset()
     }
 
     fn get_data_offset(&self) -> usize {
@@ -196,6 +204,25 @@ impl Share {
         let mut out = [0u8; 8];
         out.copy_from_slice(&self.raw_inner_ref()[..8]);
         out
+    }
+
+    pub fn is_valid_tx_start(&self, idx: usize) -> bool {
+        if NamespaceId(self.namespace()) != TRANSACTIONS_NAMESPACE {
+            return false;
+        }
+        let mut next_legal_start_offset = self.offset_of_first_tx_unchecked();
+        let mut remaining_data = self.data();
+        loop {
+            if next_legal_start_offset == idx {
+                return true;
+            }
+            if let Ok((tx_len, len_of_len)) = read_varint(&mut remaining_data) {
+                next_legal_start_offset += tx_len as usize + len_of_len;
+                remaining_data.advance(tx_len as usize);
+            } else {
+                return false;
+            }
+        }
     }
 }
 
@@ -428,7 +455,7 @@ impl<'a> BlobRefIterator<'a> {
     pub fn current_position(&self) -> (usize, usize) {
         (
             self.current_idx,
-            self.shares[self.current_idx].raw_inner_ref().len() - self.current.remaining(),
+            self.shares[self.current_idx].data_ref().len() - self.current.remaining(),
         )
     }
 }

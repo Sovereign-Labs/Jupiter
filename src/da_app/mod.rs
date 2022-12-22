@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree};
 use prost::Message;
 use sovereign_sdk::{
-    core::traits::Address,
     da::{self, TxWithSender},
     Bytes,
 };
+
+pub mod address;
+mod proofs;
 
 use crate::{
     da_service::{
@@ -19,8 +21,11 @@ use crate::{
     BlobWithSender, CelestiaHeader, MalleatedTx, Tx,
 };
 use hex_literal::hex;
+use proofs::*;
 
-pub struct Celestia {
+use self::address::CelestiaAddress;
+
+pub struct CelestiaApp {
     pub db: HashMap<tendermint::Hash, FilteredCelestiaBlock>,
 }
 
@@ -35,43 +40,7 @@ impl TxWithSender<CelestiaAddress> for BlobWithSender {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct CelestiaAddress(Vec<u8>);
-
-impl AsRef<[u8]> for CelestiaAddress {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-impl Address for CelestiaAddress {}
-
-impl<'a> TryFrom<&'a [u8]> for CelestiaAddress {
-    type Error = ();
-
-    fn try_from(value: &'a [u8]) -> Result<Self, ()> {
-        Ok(Self(value.to_vec()))
-    }
-}
-
-pub struct BlobProof {
-    pub proof: Vec<EtxRangeProof>,
-}
-
-pub struct EtxRangeProof {
-    pub shares: Vec<Vec<u8>>,
-    pub proof: nmt_rs::Proof,
-    pub start_share_idx: usize,
-    pub start_offset: usize,
-}
-
-pub struct ShareWithProof {
-    pub share: Vec<u8>,
-    pub proof: nmt_rs::Proof,
-    pub row: usize,
-    pub col: usize,
-}
-
-impl da::DaApp for Celestia {
+impl da::DaApp for CelestiaApp {
     type Blockhash = tendermint::Hash;
 
     type Address = CelestiaAddress;
@@ -79,8 +48,6 @@ impl da::DaApp for Celestia {
     type Header = CelestiaHeader;
 
     type BlobTransaction = BlobWithSender;
-
-    type InclusionProof = ();
 
     type InclusionMultiProof = Vec<BlobProof>;
 
@@ -102,7 +69,8 @@ impl da::DaApp for Celestia {
 
         let mut output = Vec::new();
         for blob in filtered_block.rollup_data.blobs() {
-            let commitment = recreate_commitment(4, blob.clone()).expect("blob must be valid");
+            let commitment = recreate_commitment(filtered_block.square_size(), blob.clone())
+                .expect("blob must be valid");
             println!("Successfully recreated commitment");
             let sender = filtered_block
                 .relevant_txs
@@ -137,7 +105,7 @@ impl da::DaApp for Celestia {
             .expect("Must only call get txs on extant blocks");
 
         let mut relevant_rows = filtered_block.relevant_rows.iter();
-        let square_size = filtered_block.header.dah.row_roots.len();
+        let square_size = filtered_block.square_size();
 
         let mut needed_tx_shares = Vec::new();
 
@@ -175,7 +143,7 @@ impl da::DaApp for Celestia {
                     } else {
                         PARITY_SHARES_NAMESPACE
                     };
-                    nmt.push_leaf(share.as_ref(), namespace)
+                    nmt.push_leaf(share.as_serialized(), namespace)
                         .expect("shares are pushed in order");
                 }
                 assert_eq!(&nmt.root(), row_root);
@@ -310,24 +278,14 @@ impl da::DaApp for Celestia {
             }
 
             // Next, ensure that the start_index is valid
-            let mut actual_start_offset = tx_shares[0].get_reserved_bytes_unchecked() as usize;
-            loop {
-                if actual_start_offset == start_offset {
-                    break;
-                }
-                let cursor =
-                    &mut std::io::Cursor::new(&tx_shares[0].as_ref()[actual_start_offset..]);
-                // Since prost's varint decoder doesn't tell you the length of the encoded varint, we clone the cursor
-                // and use a custom helper to extract it separately
-                let (tx_len, len_of_tx_len) =
-                    read_varint(cursor.clone()).expect("Must be valid varint");
-                actual_start_offset += tx_len as usize + len_of_tx_len;
+            if !tx_shares[0].is_valid_tx_start(start_offset) {
+                return Err(ValidationError::InvalidEtxProof);
             }
             let trailing_shares = tx_shares[1..]
                 .iter()
                 .map(|share| share.data_ref().iter())
                 .flatten();
-            let tx_data: Vec<u8> = tx_shares[0].as_ref()[actual_start_offset..]
+            let tx_data: Vec<u8> = tx_shares[0].data_ref()[start_offset..]
                 .iter()
                 .chain(trailing_shares)
                 .map(|x| *x)
@@ -368,11 +326,4 @@ impl da::DaApp for Celestia {
         // todo!()
         Ok(())
     }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-
-pub struct RelevantRowProof {
-    leaves: Vec<Vec<u8>>,
-    proof: nmt_rs::Proof,
 }

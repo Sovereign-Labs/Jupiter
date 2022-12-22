@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jupiter::{da_app::Celestia, da_service::CelestiaService};
+use jupiter::{da_app::CelestiaApp, da_service::CelestiaService};
 use sovereign_sdk::{
     core::traits::CanonicalHash,
     da::{DaApp, DaService},
@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db.insert(hash, block);
     }
 
-    let celestia = Celestia { db };
+    let celestia = CelestiaApp { db };
     for (hash, header) in ordered_hashes.into_iter().zip(ordered_headers) {
         let (txs, inclusion_proof, completeness_proof) =
             celestia.get_relevant_txs_with_proof(&hash);

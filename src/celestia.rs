@@ -8,7 +8,7 @@ use sovereign_sdk::core::traits::{Address, Blockheader, CanonicalHash};
 const NAMESPACED_HASH_LEN: usize = 48;
 
 use crate::{
-    da_app::CelestiaAddress,
+    da_app::address::CelestiaAddress,
     payment::MsgPayForData,
     shares::{Blob, BlobRefIterator, NamespaceGroup},
     MalleatedTx, Tx,
@@ -68,6 +68,12 @@ pub struct NamespacedSharesResponse {
 pub struct CelestiaHeader {
     pub dah: DataAvailabilityHeader,
     pub header: tendermint::block::Header,
+}
+
+impl CelestiaHeader {
+    pub fn square_size(&self) -> usize {
+        self.dah.row_roots.len()
+    }
 }
 
 impl CanonicalHash for CelestiaHeader {
