@@ -1,6 +1,6 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use nmt_rs::{NamespaceId, NamespacedHash};
+use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree, NamespacedHash};
 use serde::Deserialize;
 use sovereign_sdk::{da::DaService, Bytes};
 use tendermint::merkle;
@@ -26,13 +26,30 @@ pub struct CelestiaService;
 pub struct FilteredCelestiaBlock {
     pub header: CelestiaHeader,
     pub rollup_data: NamespaceGroup,
-    pub relevant_txs: HashMap<Bytes, (MsgPayForData, TxPosition)>,
-    pub relevant_rows: Vec<RelevantRow>,
+    pub relevant_etxs: HashMap<Bytes, (MsgPayForData, TxPosition)>,
+    /// All rows in the block which contain rollup or e-tx data
+    pub rollup_rows: Vec<Row>,
+    pub etx_rows: Vec<Row>,
 }
 
 impl FilteredCelestiaBlock {
     pub fn square_size(&self) -> usize {
         self.header.square_size()
+    }
+
+    pub fn get_row_number(&self, share_idx: usize) -> usize {
+        share_idx / self.square_size()
+    }
+    pub fn get_col_number(&self, share_idx: usize) -> usize {
+        share_idx % self.square_size()
+    }
+
+    pub fn row_root_for_share(&self, share_idx: usize) -> &NamespacedHash {
+        &self.header.dah.row_roots[self.get_row_number(share_idx)]
+    }
+
+    pub fn col_root_for_share(&self, share_idx: usize) -> &NamespacedHash {
+        &self.header.dah.column_roots[self.get_col_number(share_idx)]
     }
 }
 
@@ -110,7 +127,9 @@ impl DaService for CelestiaService {
             }
 
             let dah = header_response.dah.try_into()?;
-            let relevant_rows = get_relevant_rows(height, ROLLUP_NAMESPACE, &dah).await?;
+            let etx_rows =
+                get_rows_containing_namespace(height, TRANSACTIONS_NAMESPACE, &dah).await?;
+            let rollup_rows = get_rows_containing_namespace(height, ROLLUP_NAMESPACE, &dah).await?;
 
             // let original_rows = &header_response.dah.row_roots;
             let filtered_block = FilteredCelestiaBlock {
@@ -119,8 +138,9 @@ impl DaService for CelestiaService {
                     dah,
                 },
                 rollup_data: rollup_shares,
-                relevant_txs: pfd_map,
-                relevant_rows: relevant_rows,
+                relevant_etxs: pfd_map,
+                rollup_rows,
+                etx_rows,
             };
 
             Ok::<Self::FilteredBlock, Box<dyn std::error::Error>>(filtered_block)
@@ -134,29 +154,49 @@ impl DaService for CelestiaService {
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct SharesResponse {
-    shares: Vec<Vec<Share>>,
+    #[serde(rename = "shares")]
+    rows: Vec<Vec<Share>>,
     // height: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RelevantRow {
-    pub row: Vec<Share>,
+pub struct Row {
+    pub shares: Vec<Share>,
     pub root: NamespacedHash,
 }
 
-async fn get_relevant_rows(
+impl Row {
+    pub fn merklized(&self) -> NamespaceMerkleTree<MemDb> {
+        let mut nmt = NamespaceMerkleTree::<MemDb>::new();
+        for (idx, share) in self.shares.iter().enumerate() {
+            // Shares in the two left-hand quadrants are prefixed with their namespace, while parity
+            // shares (in the right-hand) quadrants always have the PARITY_SHARES_NAMESPACE
+            let namespace = if idx < self.shares.len() / 2 {
+                share.namespace()
+            } else {
+                PARITY_SHARES_NAMESPACE
+            };
+            nmt.push_leaf(share.as_serialized(), namespace)
+                .expect("shares are pushed in order");
+        }
+        assert_eq!(&nmt.root(), &self.root);
+        nmt
+    }
+}
+
+async fn get_rows_containing_namespace(
     height: usize,
     nid: NamespaceId,
     dah: &DataAvailabilityHeader,
-) -> Result<Vec<RelevantRow>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Row>, Box<dyn std::error::Error>> {
     let rpc_addr = format!("http://localhost:26659/shares/height/{}", height);
     let resp = reqwest::get(rpc_addr).await?.text().await?;
     let response: SharesResponse = serde_json::from_str(&resp)?;
     let mut output = Vec::new();
-    for (row, root) in response.shares.into_iter().zip(dah.row_roots.iter()) {
-        if root.contains(TRANSACTIONS_NAMESPACE) || root.contains(nid) {
-            output.push(RelevantRow {
-                row,
+    for (row, root) in response.rows.into_iter().zip(dah.row_roots.iter()) {
+        if root.contains(nid) {
+            output.push(Row {
+                shares: row,
                 root: root.clone(),
             })
         }

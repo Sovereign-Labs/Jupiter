@@ -49,7 +49,7 @@ impl da::DaApp for CelestiaApp {
 
     type BlobTransaction = BlobWithSender;
 
-    type InclusionMultiProof = Vec<BlobProof>;
+    type InclusionMultiProof = Vec<EtxProof>;
 
     type CompletenessProof = Vec<RelevantRowProof>;
 
@@ -73,7 +73,7 @@ impl da::DaApp for CelestiaApp {
                 .expect("blob must be valid");
             println!("Successfully recreated commitment");
             let sender = filtered_block
-                .relevant_txs
+                .relevant_etxs
                 .get(&commitment[..])
                 .expect("blob must be relevant")
                 .0
@@ -97,110 +97,16 @@ impl da::DaApp for CelestiaApp {
         Self::InclusionMultiProof,
         Self::CompletenessProof,
     ) {
-        let relevant_txs = self.get_relevant_txs(blockhash);
-
         let filtered_block = self
             .db
             .get(blockhash)
             .expect("Must only call get txs on extant blocks");
 
-        let mut relevant_rows = filtered_block.relevant_rows.iter();
-        let square_size = filtered_block.square_size();
+        let relevant_txs = self.get_relevant_txs(blockhash);
+        let etx_proofs = CorrectnessProof::for_block(filtered_block, &relevant_txs);
+        let rollup_row_proofs = CompletenessProof::from_filtered_block(filtered_block);
 
-        let mut needed_tx_shares = Vec::new();
-
-        for tx in relevant_txs.iter() {
-            let commitment = recreate_commitment(square_size, BlobRef::with(&tx.blob.0))
-                .expect("commitment is valid");
-
-            let (_, position) = filtered_block
-                .relevant_txs
-                .get(&commitment[..])
-                .expect("commitment must exist in map");
-            needed_tx_shares.push(position.clone());
-        }
-
-        let mut needed_tx_shares = needed_tx_shares.into_iter().peekable();
-
-        // Compute the completeness proof for the namespace data by computing the merkle tree for
-        // each relevant row, and the generating a namespace proof from that tree
-        let mut rollup_row_proofs = Vec::new();
-
-        let mut current_tx_proof: BlobProof = BlobProof { proof: Vec::new() };
-        let mut tx_proofs: Vec<BlobProof> = Vec::with_capacity(needed_tx_shares.len());
-        for (row_idx, row_root) in filtered_block.header.dah.row_roots.iter().enumerate() {
-            if row_root.contains(TRANSACTIONS_NAMESPACE) || row_root.contains(ROLLUP_NAMESPACE) {
-                let mut nmt = NamespaceMerkleTree::<MemDb>::new();
-                let next_row = relevant_rows
-                    .next()
-                    .expect("All relevant rows must be present");
-                assert!(row_root == &next_row.root);
-                for (idx, share) in next_row.row.iter().enumerate() {
-                    // Shares in the two left-hand quadrants are prefixed with their namespace, while parity
-                    // shares (in the right-hand) quadrants always have the PARITY_SHARES_NAMESPACE
-                    let namespace = if idx < next_row.row.len() / 2 {
-                        share.namespace()
-                    } else {
-                        PARITY_SHARES_NAMESPACE
-                    };
-                    nmt.push_leaf(share.as_serialized(), namespace)
-                        .expect("shares are pushed in order");
-                }
-                assert_eq!(&nmt.root(), row_root);
-                while let Some(next_needed_share) = needed_tx_shares.peek_mut() {
-                    // If the next needed share falls in this row
-                    let row_adjustment = square_size * row_idx;
-                    let start_column_number = next_needed_share.share_range.start - row_adjustment;
-                    if start_column_number < square_size {
-                        let end_column_number = next_needed_share.share_range.end - row_adjustment;
-                        if end_column_number <= square_size {
-                            let (shares, proof) =
-                                nmt.get_range_with_proof(start_column_number..end_column_number);
-
-                            current_tx_proof.proof.push(EtxRangeProof {
-                                shares,
-                                proof,
-                                start_offset: next_needed_share.start_offset,
-                                start_share_idx: next_needed_share.share_range.start,
-                            });
-                            tx_proofs.push(current_tx_proof);
-                            current_tx_proof = BlobProof { proof: Vec::new() };
-                            let _ = needed_tx_shares.next();
-                        } else {
-                            let (shares, proof) =
-                                nmt.get_range_with_proof(start_column_number..square_size);
-
-                            current_tx_proof.proof.push(EtxRangeProof {
-                                shares,
-                                proof,
-                                start_offset: next_needed_share.start_offset,
-                                start_share_idx: next_needed_share.share_range.start,
-                            });
-                            next_needed_share.share_range.start = square_size * (row_idx + 1);
-                            next_needed_share.start_offset = 0;
-
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                if row_root.contains(ROLLUP_NAMESPACE) {
-                    let (leaves, proof) = nmt.get_namespace_with_proof(ROLLUP_NAMESPACE);
-                    let row_proof = RelevantRowProof { leaves, proof };
-                    rollup_row_proofs.push(row_proof)
-                }
-            }
-        }
-
-        assert!(filtered_block.header.validate_dah().is_ok());
-
-        // We use the abuse the inclusion proof for each blob-with-sender to link the
-        // sender with the blob data. Future changes to Celestia should make this unnecessary.
-        // filtered_block
-
-        (relevant_txs, tx_proofs, rollup_row_proofs)
+        (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
     }
 
     // Workflow:
