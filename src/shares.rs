@@ -4,6 +4,7 @@ use base64::STANDARD;
 use prost::{
     bytes::{Buf, BytesMut},
     encoding::decode_varint,
+    DecodeError,
 };
 use serde::{de::Error, Deserialize};
 use sovereign_sdk::{
@@ -21,6 +22,13 @@ pub fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
         }
     }
     Err(ErrInvalidVarint)
+}
+
+/// Read a varint. Returns the value (as a u64) and the number of bytes read
+pub fn read_varint(mut bytes: impl Buf) -> Result<(u64, usize), DecodeError> {
+    let original_len = bytes.remaining();
+    let varint = decode_varint(&mut bytes)?;
+    Ok((varint, original_len - bytes.remaining()))
 }
 
 #[derive(Debug, PartialEq)]
@@ -420,7 +428,6 @@ impl<'a> BlobRefIterator<'a> {
     pub fn current_position(&self) -> (usize, usize) {
         (
             self.current_idx,
-            // self.current.len() + self.shares[self.current_idx].get_data_offset()
             self.shares[self.current_idx].raw_inner_ref().len() - self.current.remaining(),
         )
     }

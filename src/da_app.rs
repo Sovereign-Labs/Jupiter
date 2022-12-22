@@ -16,7 +16,10 @@ use crate::{
     },
     payment::MsgPayForData,
     share_commit::recreate_commitment,
-    shares::{skip_varint, Blob, BlobIterator, BlobRef, BlobRefIterator, NamespaceGroup, Share},
+    shares::{
+        read_varint, skip_varint, Blob, BlobIterator, BlobRef, BlobRefIterator, NamespaceGroup,
+        Share,
+    },
     BlobWithSender, CelestiaHeader, MalleatedTx, Sha2Hash, Tx, H160,
 };
 use hex_literal::hex;
@@ -320,9 +323,9 @@ impl da::DaApp for Celestia {
                     &mut std::io::Cursor::new(&tx_shares[0].as_ref()[actual_start_offset..]);
                 // Since prost's varint decoder doesn't tell you the length of the encoded varint, we clone the cursor
                 // and use a custom helper to extract it separately
-                let varint_length = skip_varint(cursor.clone()).expect("Must be valid varint");
-                actual_start_offset +=
-                    varint_length + decode_varint(cursor).expect("Must be valid varint") as usize;
+                let (tx_len, len_of_tx_len) =
+                    read_varint(cursor.clone()).expect("Must be valid varint");
+                actual_start_offset += tx_len as usize + len_of_tx_len;
             }
             let trailing_shares = tx_shares[1..]
                 .iter()
@@ -334,19 +337,14 @@ impl da::DaApp for Celestia {
                 .map(|x| *x)
                 .collect();
 
-            let len_of_len = {
-                let mut cursor = std::io::Cursor::new(&tx_data);
-                skip_varint(cursor).expect("tx must be length prefixed")
+            let (len, len_of_len) = {
+                let cursor = std::io::Cursor::new(&tx_data);
+                read_varint(cursor).expect("tx must be length prefixed")
             };
-
-            let len = {
-                let mut cursor = std::io::Cursor::new(&tx_data);
-                decode_varint(&mut cursor).expect("tx must be length prefixed") as usize
-            };
-            let cursor = std::io::Cursor::new(&tx_data[len_of_len..len + len_of_len]);
+            let cursor = std::io::Cursor::new(&tx_data[len_of_len..len as usize + len_of_len]);
 
             let malleated =
-                MalleatedTx::decode(cursor).map_err(|e| ValidationError::InvalidEtxProof)?;
+                MalleatedTx::decode(cursor).map_err(|_| ValidationError::InvalidEtxProof)?;
             if malleated.original_tx_hash.len() != 32 {
                 return Err(ValidationError::InvalidEtxProof);
             }

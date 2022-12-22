@@ -64,22 +64,7 @@ pub struct NamespacedSharesResponse {
     pub height: u64,
 }
 
-// #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-// /// The minimal portion of a celestia header required for DA verification
-// pub struct CelestiaHeader {
-//     pub version: CelestiaVersion,
-//     pub chain_id: String,
-//     pub height: u64,
-//     pub time: String, // TODO: Make this an actual time
-//     pub last_block_id: PreviousBlock,
-//     pub last_commit_hash: Sha2Hash,
-//     pub data_hash: Sha2Hash,
-//     pub consensus_hash: Sha2Hash,
-//     pub app_hash: Sha2Hash,
-// }
-
 #[derive(Debug, PartialEq, Clone)]
-
 pub struct CelestiaHeader {
     pub dah: DataAvailabilityHeader,
     pub header: tendermint::block::Header,
@@ -163,12 +148,6 @@ pub enum TxType {
     Other(Tx),
 }
 
-// pub fn get_pfds(height: u64) -> Result<Vec<MsgPayForData>, Box<dyn std::error::Error>> {
-//     let e_tx_shares = get_namespace_data(height, [0, 0, 0, 0, 0, 0, 0, 1])?;
-//     let pfds = parse_tx_namespace(e_tx_shares)?;
-//     Ok(pfds)
-// }
-
 pub fn parse_tx_namespace(
     group: NamespaceGroup,
 ) -> Result<Vec<(MsgPayForData, TxPosition)>, Box<dyn std::error::Error>> {
@@ -181,14 +160,12 @@ pub fn parse_tx_namespace(
         let mut data = blob.data();
         println!("Total Data length: {}", data.remaining());
 
-        // let mut data = std::io::Cursor::new(data);
         while data.has_remaining() {
             dbg!(data.remaining());
             if let Some(tx) = next_e_tx(&mut data)? {
                 pfbs.push(tx)
             }
         }
-        // assert_eq!(data_from_node, data);
     }
     Ok(pfbs)
 }
@@ -207,7 +184,7 @@ fn next_e_tx(
 ) -> Result<Option<(MsgPayForData, TxPosition)>, Box<dyn std::error::Error>> {
     let (start_idx, start_offset) = data.current_position();
     let len = decode_varint(&mut data).expect("Varint must be valid");
-    let mut backup = data.clone();
+    let backup = data.clone();
     let tx = match MalleatedTx::decode(&mut data) {
         Ok(malleated) => {
             // The hash length must be 32
@@ -215,7 +192,6 @@ fn next_e_tx(
                 *data = backup;
                 TxType::Other(Tx::decode(&mut data)?)
             } else {
-                println!("cursor leading_bytes: {:?}", printable_slice);
                 TxType::Pfd(malleated)
             }
         }
@@ -231,7 +207,7 @@ fn next_e_tx(
             let inner = malleated.tx.clone();
             Tx::decode(inner)?
         }
-        TxType::Other(tx) => panic!("This tx is unmalleated and should ahve been skipped"),
+        TxType::Other(_) => panic!("This tx is unmalleated and should ahve been skipped"),
     };
 
     let body = sdk_tx.body.expect("transaction must have body");
@@ -253,28 +229,3 @@ fn next_e_tx(
     }
     Ok(None)
 }
-
-// pub fn get_namespace_data(
-//     height: u64,
-//     namespace: [u8; 8],
-// ) -> Result<NamespaceGroup, Box<dyn std::error::Error>> {
-//     let rpc_addr = format!(
-//         "http://localhost:26659/namespaced_shares/{}/height/{}",
-//         hex::encode(namespace),
-//         height
-//     );
-
-//     let body = reqwest::blocking::get(rpc_addr)?.text()?;
-//     let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
-//     let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
-//     Ok(shares)
-// }
-
-// pub fn get_header(height: u64) -> Result<tendermint::block::Header, Box<dyn std::error::Error>> {
-//     let rpc_addr = format!("http://localhost:26659/header/{}", height);
-
-//     let body = reqwest::blocking::get(rpc_addr)?.text()?;
-//     let response: CelestiaHeaderResponse = serde_json::from_str(&body)?;
-//     // let shares = NamespaceGroup::from_b64_shares(&response.shares)?;
-//     Ok(response.header)
-// }
