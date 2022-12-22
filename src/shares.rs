@@ -1,6 +1,10 @@
 use std::fmt::Display;
 
-use prost::{bytes::Buf, encoding::decode_varint};
+use base64::STANDARD;
+use prost::{
+    bytes::{Buf, BytesMut},
+    encoding::decode_varint,
+};
 use serde::{de::Error, Deserialize};
 use sovereign_sdk::{
     core::crypto::hash::{sha2, Sha2Hash},
@@ -8,7 +12,7 @@ use sovereign_sdk::{
 };
 
 /// Skip over a varint. Returns the number of bytes read
-fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
+pub fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
     // A varint may contain up to 10 bytes
     for i in 0..10 {
         // If the continuation bit is not set, we're done
@@ -24,6 +28,8 @@ pub struct ErrInvalidVarint;
 
 /// The size of a share, in bytes
 const SHARE_SIZE: usize = 512;
+/// The size of base64 encoded share, in bytes
+const B64_SHARE_SIZE: usize = 684;
 /// The length of a namespace, in bytes,
 const NAMESPACE_LEN: usize = 8;
 /// Value of maximum reserved namespace ID, as a big endian integer
@@ -47,7 +53,14 @@ impl<'de> Deserialize<'de> for Share {
     where
         D: serde::Deserializer<'de>,
     {
-        let share = Bytes::deserialize(deserializer)?;
+        let mut share = Bytes::deserialize(deserializer)?;
+        if share.len() == B64_SHARE_SIZE {
+            let mut decoded = BytesMut::with_capacity(SHARE_SIZE);
+            unsafe { decoded.set_len(SHARE_SIZE) }
+            base64::decode_config_slice(share, STANDARD, &mut decoded[..])
+                .map_err(|_| Error::custom("Invalid base64 encoding"))?;
+            share = decoded.freeze()
+        }
         if share.len() != SHARE_SIZE {
             // let expected = Unexpected::Bytes(&share);
             return Err(Error::invalid_length(share.len(), &"A share of length 512"));
@@ -125,6 +138,15 @@ impl Share {
 
     pub fn hash(&self) -> Sha2Hash {
         sha2(self.raw_inner_ref())
+    }
+
+    /// returns the reserved bytes of this share, assuming that it's a
+    /// compact share. if this is a sparse share, this function will return garbage
+    /// and may panic
+    pub fn get_reserved_bytes_unchecked(&self) -> u64 {
+        let offset = self.get_data_offset() - 2;
+        decode_varint(&mut std::io::Cursor::new(&self.raw_inner_ref()[offset..]))
+            .expect("reserved bytes must be valid varint")
     }
 
     fn get_data_offset(&self) -> usize {
@@ -219,6 +241,9 @@ impl NamespaceGroup {
     }
 
     pub fn from_b64_shares(encoded_shares: &Vec<String>) -> Result<Self, ShareParsingError> {
+        if encoded_shares.len() == 0 {
+            return Ok(Self::Sparse(vec![]));
+        }
         let mut shares = Vec::with_capacity(encoded_shares.len());
         for share in encoded_shares {
             let decoded_vec =
@@ -237,6 +262,22 @@ impl NamespaceGroup {
             Ok(Self::Sparse(shares))
         }
     }
+
+    // Panics if less than 1 share is provided
+    pub fn from_shares_unchecked(shares: Vec<Vec<u8>>) -> Self {
+        let shares: Vec<Share> = shares
+            .into_iter()
+            .map(|share| Share::new(Bytes::from(share)))
+            .collect();
+
+        let namespace = shares[0].namespace();
+        if u64::from_be_bytes(namespace) <= MAX_RESERVED_NAMESPACE_ID {
+            Self::Compact(shares)
+        } else {
+            Self::Sparse(shares)
+        }
+    }
+
     pub fn shares(&self) -> &Vec<Share> {
         match self {
             NamespaceGroup::Compact(shares) => shares,
@@ -373,6 +414,16 @@ pub struct BlobRefIterator<'a> {
     current: Bytes,
     current_idx: usize,
     shares: &'a [Share],
+}
+
+impl<'a> BlobRefIterator<'a> {
+    pub fn current_position(&self) -> (usize, usize) {
+        (
+            self.current_idx,
+            // self.current.len() + self.shares[self.current_idx].get_data_offset()
+            self.shares[self.current_idx].raw_inner_ref().len() - self.current.remaining(),
+        )
+    }
 }
 
 impl<'a> Iterator for BlobRefIterator<'a> {

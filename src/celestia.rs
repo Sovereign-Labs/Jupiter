@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use nmt_rs::NamespacedHash;
 use prost::{bytes::Buf, encoding::decode_varint, Message};
 use serde::{Deserialize, Serialize};
@@ -8,7 +10,7 @@ const NAMESPACED_HASH_LEN: usize = 48;
 use crate::{
     da_app::CelestiaAddress,
     payment::MsgPayForData,
-    shares::{Blob, NamespaceGroup},
+    shares::{Blob, BlobRefIterator, NamespaceGroup},
     MalleatedTx, Tx,
 };
 
@@ -58,7 +60,7 @@ pub struct CelestiaHeaderResponse {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct NamespacedSharesResponse {
-    pub shares: Vec<String>,
+    pub shares: Option<Vec<String>>,
     pub height: u64,
 }
 
@@ -169,18 +171,19 @@ pub enum TxType {
 
 pub fn parse_tx_namespace(
     group: NamespaceGroup,
-) -> Result<Vec<MsgPayForData>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(MsgPayForData, TxPosition)>, Box<dyn std::error::Error>> {
     if group.shares().len() == 0 {
         return Ok(vec![]);
     }
     assert!(group.shares()[0].namespace() == [0u8, 0, 0, 0, 0, 0, 0, 1]);
     let mut pfbs = Vec::new();
     for blob in group.blobs() {
-        let data: Vec<u8> = blob.data().collect();
-        println!("Total Data length: {}", data.len());
+        let mut data = blob.data();
+        println!("Total Data length: {}", data.remaining());
 
-        let mut data = std::io::Cursor::new(data);
+        // let mut data = std::io::Cursor::new(data);
         while data.has_remaining() {
+            dbg!(data.remaining());
             if let Some(tx) = next_e_tx(&mut data)? {
                 pfbs.push(tx)
             }
@@ -190,25 +193,36 @@ pub fn parse_tx_namespace(
     Ok(pfbs)
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct TxPosition {
+    /// The half-open range of shares across which this transaction is serialized.
+    /// For example a transaction which was split across shares 5,6, and 7 would have range 5..8
+    pub share_range: Range<usize>,
+    /// The offset into the first share at which the transaction starts
+    pub start_offset: usize,
+}
+
 fn next_e_tx(
-    mut data: &mut std::io::Cursor<Vec<u8>>,
-) -> Result<Option<MsgPayForData>, Box<dyn std::error::Error>> {
+    mut data: &mut BlobRefIterator,
+) -> Result<Option<(MsgPayForData, TxPosition)>, Box<dyn std::error::Error>> {
+    let (start_idx, start_offset) = data.current_position();
     let len = decode_varint(&mut data).expect("Varint must be valid");
-    dbg!("Found tx with", len);
-    let backup = data.position();
+    let mut backup = data.clone();
     let tx = match MalleatedTx::decode(&mut data) {
         Ok(malleated) => {
             // The hash length must be 32
             if malleated.original_tx_hash.len() != 32 {
-                data.set_position(backup);
-                TxType::Other(Tx::decode(data)?)
+                *data = backup;
+                TxType::Other(Tx::decode(&mut data)?)
             } else {
+                println!("cursor leading_bytes: {:?}", printable_slice);
                 TxType::Pfd(malleated)
             }
         }
         Err(_) => {
-            data.set_position(backup);
-            TxType::Other(Tx::decode(data)?)
+            *data = backup;
+            data.advance(len as usize);
+            return Ok(None);
         }
     };
 
@@ -217,16 +231,24 @@ fn next_e_tx(
             let inner = malleated.tx.clone();
             Tx::decode(inner)?
         }
-        TxType::Other(tx) => tx,
+        TxType::Other(tx) => panic!("This tx is unmalleated and should ahve been skipped"),
     };
 
     let body = sdk_tx.body.expect("transaction must have body");
     if body.messages.len() == 1 {
         for msg in body.messages {
-            if msg.type_url == "/payment.MsgPayForData" {
-                let pfd = MsgPayForData::decode(std::io::Cursor::new(msg.value))?;
-                return Ok(Some(pfd));
+            if msg.type_url != "/payment.MsgPayForData" {
+                panic!("This tx is not a pfd and should have been skipped")
             }
+            let pfd = MsgPayForData::decode(std::io::Cursor::new(msg.value))?;
+            let current_share_idx = data.current_position().0;
+            return Ok(Some((
+                pfd,
+                TxPosition {
+                    share_range: start_idx..current_share_idx + 1,
+                    start_offset,
+                },
+            )));
         }
     }
     Ok(None)

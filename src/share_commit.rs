@@ -55,7 +55,6 @@ pub fn recreate_commitment(
             tree.push_leaf(share.as_ref(), nid)
                 .expect("Leaves are pushed in order");
         }
-
         subtree_roots.push(tree.root());
     }
     let h = simple_hash_from_byte_vectors(
