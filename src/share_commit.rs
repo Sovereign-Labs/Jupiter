@@ -1,21 +1,19 @@
 use crate::shares::{self, Share};
 
-use self::nmt::build_nmt_from_namespaced_leaves;
-
 use nmt_rs::{db::MemDb, NamespaceId};
 use tendermint::merkle::simple_hash_from_byte_vectors;
 
-/// Calculates the size of the smallest square that could be used to commit
-/// to this message, following Celestia's "non-interactive default rules"
-/// https://github.com/celestiaorg/celestia-app/blob/fbfbf111bcaa056e53b0bc54d327587dee11a945/docs/architecture/adr-008-blocksize-independent-commitment.md
-fn min_square_size(message: &[u8]) -> usize {
-    let square_size = message.len().next_power_of_two();
-    if message.len() < (square_size * square_size - 1) {
-        return square_size;
-    } else {
-        return square_size << 1;
-    }
-}
+// /// Calculates the size of the smallest square that could be used to commit
+// /// to this message, following Celestia's "non-interactive default rules"
+// /// https://github.com/celestiaorg/celestia-app/blob/fbfbf111bcaa056e53b0bc54d327587dee11a945/docs/architecture/adr-008-blocksize-independent-commitment.md
+// fn min_square_size(message: &[u8]) -> usize {
+//     let square_size = message.len().next_power_of_two();
+//     if message.len() < (square_size * square_size - 1) {
+//         return square_size;
+//     } else {
+//         return square_size << 1;
+//     }
+// }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum CommitmentError {

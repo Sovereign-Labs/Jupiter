@@ -1,7 +1,7 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
 use nmt_rs::{NamespaceId, NamespacedHash};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sovereign_sdk::{da::DaService, Bytes};
 use tendermint::merkle;
 
@@ -15,8 +15,8 @@ use crate::{
     parse_tx_namespace,
     payment::MsgPayForData,
     shares::{NamespaceGroup, Share},
-    CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader,
-    MarshalledDataAvailabilityHeader, NamespacedSharesResponse, TxPosition,
+    CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, NamespacedSharesResponse,
+    TxPosition,
 };
 
 #[derive(Debug, Clone)]

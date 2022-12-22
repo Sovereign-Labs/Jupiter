@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
 use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree};
-use prost::{encoding::decode_varint, Message};
+use prost::Message;
 use sovereign_sdk::{
-    core::traits::{Address, Transaction},
+    core::traits::Address,
     da::{self, TxWithSender},
     Bytes,
 };
-use tendermint::merkle;
 
 use crate::{
     da_service::{
@@ -16,11 +15,8 @@ use crate::{
     },
     payment::MsgPayForData,
     share_commit::recreate_commitment,
-    shares::{
-        read_varint, skip_varint, Blob, BlobIterator, BlobRef, BlobRefIterator, NamespaceGroup,
-        Share,
-    },
-    BlobWithSender, CelestiaHeader, MalleatedTx, Sha2Hash, Tx, H160,
+    shares::{read_varint, BlobIterator, BlobRef, NamespaceGroup, Share},
+    BlobWithSender, CelestiaHeader, MalleatedTx, Tx,
 };
 use hex_literal::hex;
 
@@ -185,7 +181,7 @@ impl da::DaApp for Celestia {
                 assert_eq!(&nmt.root(), row_root);
                 while let Some(next_needed_share) = needed_tx_shares.peek_mut() {
                     // If the next needed share falls in this row
-                    let row_adjustment = (square_size * row_idx);
+                    let row_adjustment = square_size * row_idx;
                     let start_column_number = next_needed_share.share_range.start - row_adjustment;
                     if start_column_number < square_size {
                         let end_column_number = next_needed_share.share_range.end - row_adjustment;
