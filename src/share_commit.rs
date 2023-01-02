@@ -1,6 +1,5 @@
 use crate::shares::{self, Share};
 
-use nmt_rs::{db::MemDb, NamespaceId};
 use tendermint::merkle::simple_hash_from_byte_vectors;
 
 // /// Calculates the size of the smallest square that could be used to commit
@@ -47,7 +46,7 @@ pub fn recreate_commitment(
 
     let mut subtree_roots = Vec::with_capacity(leaf_sets.len());
     for set in leaf_sets {
-        let mut tree = nmt_rs::NamespaceMerkleTree::<MemDb>::new();
+        let mut tree = nmt_rs::CelestiaNmt::new();
         for share in set {
             let nid = share.namespace();
             tree.push_leaf(share.as_serialized(), nid)
@@ -97,10 +96,10 @@ fn next_lower_power_of_2(num: usize) -> usize {
 }
 
 mod nmt {
-    use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree};
+    use nmt_rs::{CelestiaNmt, NamespaceId};
     /// Build an nmt from leaves that are already prefixed with their namespace
     pub fn build_nmt_from_namespaced_leaves(namespaced_leaves: &[impl AsRef<[u8]>]) -> [u8; 48] {
-        let mut tree = NamespaceMerkleTree::<MemDb>::new();
+        let mut tree = CelestiaNmt::new();
         for leaf in namespaced_leaves.iter() {
             let namespace: NamespaceId = leaf.as_ref()[..8]
                 .as_ref()
@@ -112,12 +111,12 @@ mod nmt {
         tree.root().0
     }
 
-    pub fn build_nmt(leaves: &[(impl AsRef<[u8]>, NamespaceId)]) -> [u8; 48] {
-        let mut tree = NamespaceMerkleTree::<MemDb>::new();
-        for (leaf, ns) in leaves {
-            tree.push_leaf(leaf.as_ref(), *ns);
-        }
+    // pub fn build_nmt(leaves: &[(impl AsRef<[u8]>, NamespaceId)]) -> [u8; 48] {
+    //     let mut tree = CelestiaNmt::new();
+    //     for (leaf, ns) in leaves {
+    //         tree.push_leaf(leaf.as_ref(), *ns);
+    //     }
 
-        tree.root().0
-    }
+    //     tree.root().0
+    // }
 }

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree, NamespacedHash};
+use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
 use sovereign_sdk::{da::DaService, Bytes};
 use tendermint::merkle;
@@ -166,8 +166,8 @@ pub struct Row {
 }
 
 impl Row {
-    pub fn merklized(&self) -> NamespaceMerkleTree<MemDb> {
-        let mut nmt = NamespaceMerkleTree::<MemDb>::new();
+    pub fn merklized(&self) -> CelestiaNmt {
+        let mut nmt = CelestiaNmt::new();
         for (idx, share) in self.shares.iter().enumerate() {
             // Shares in the two left-hand quadrants are prefixed with their namespace, while parity
             // shares (in the right-hand) quadrants always have the PARITY_SHARES_NAMESPACE

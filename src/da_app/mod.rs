@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use nmt_rs::{db::MemDb, NamespaceId, NamespaceMerkleTree};
 use prost::Message;
 use sovereign_sdk::{
     da::{self, TxWithSender},
@@ -12,12 +11,11 @@ mod proofs;
 
 use crate::{
     da_service::{
-        FilteredCelestiaBlock, ValidationError, PARITY_SHARES_NAMESPACE, ROLLUP_NAMESPACE,
-        TRANSACTIONS_NAMESPACE,
+        FilteredCelestiaBlock, ValidationError, ROLLUP_NAMESPACE, TRANSACTIONS_NAMESPACE,
     },
     payment::MsgPayForData,
     share_commit::recreate_commitment,
-    shares::{read_varint, BlobIterator, BlobRef, NamespaceGroup, Share},
+    shares::{read_varint, BlobIterator, NamespaceGroup, Share},
     BlobWithSender, CelestiaHeader, MalleatedTx, Tx,
 };
 use hex_literal::hex;
@@ -219,10 +217,16 @@ impl da::DaApp for CelestiaApp {
                         return Err(ValidationError::InvalidSigner);
                     }
 
-                    let blob_data: Bytes = blob.data().collect();
+                    let blob_ref = blob.clone();
+                    let blob_data: Bytes = blob.clone().data().collect();
                     let tx_data: Bytes = tx.data().collect();
-                    assert_eq!(blob_data, tx_data)
-                    // TODO - link share commitment to blob commitment
+                    assert_eq!(blob_data, tx_data);
+
+                    // Link blob commitment to e-tx commitment
+                    let expected_commitment = recreate_commitment(square_size, blob_ref)
+                        .map_err(|_| ValidationError::InvalidEtxProof)?;
+
+                    assert_eq!(&pfd.message_share_commitment[..], &expected_commitment);
                 }
             }
         }
