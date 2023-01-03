@@ -12,6 +12,7 @@ use crate::{
     da_service::TRANSACTIONS_NAMESPACE,
     payment::MsgPayForData,
     shares::{Blob, BlobRefIterator, NamespaceGroup},
+    utils::BoxError,
     MalleatedTx, Tx,
 };
 
@@ -157,7 +158,7 @@ pub enum TxType {
 
 pub fn parse_tx_namespace(
     group: NamespaceGroup,
-) -> Result<Vec<(MsgPayForData, TxPosition)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(MsgPayForData, TxPosition)>, BoxError> {
     if group.shares().len() == 0 {
         return Ok(vec![]);
     }
@@ -188,7 +189,7 @@ pub struct TxPosition {
 
 fn next_e_tx(
     mut data: &mut BlobRefIterator,
-) -> Result<Option<(MsgPayForData, TxPosition)>, Box<dyn std::error::Error>> {
+) -> Result<Option<(MsgPayForData, TxPosition)>, BoxError> {
     let (start_idx, start_offset) = data.current_position();
     let len = decode_varint(&mut data).expect("Varint must be valid");
     let backup = data.clone();

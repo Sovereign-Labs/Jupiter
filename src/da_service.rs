@@ -15,6 +15,7 @@ use crate::{
     parse_tx_namespace,
     payment::MsgPayForData,
     shares::{NamespaceGroup, Share},
+    utils::BoxError,
     CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, NamespacedSharesResponse,
     TxPosition,
 };
@@ -89,7 +90,7 @@ impl DaService for CelestiaService {
 
     // type Address;
 
-    type Error = Box<dyn std::error::Error>;
+    type Error = BoxError;
 
     fn get_finalized_at(height: usize) -> Self::Future<Self::FilteredBlock> {
         Box::pin(async move {
@@ -143,7 +144,7 @@ impl DaService for CelestiaService {
                 etx_rows,
             };
 
-            Ok::<Self::FilteredBlock, Box<dyn std::error::Error>>(filtered_block)
+            Ok::<Self::FilteredBlock, BoxError>(filtered_block)
         })
     }
 
@@ -188,7 +189,7 @@ async fn get_rows_containing_namespace(
     height: usize,
     nid: NamespaceId,
     dah: &DataAvailabilityHeader,
-) -> Result<Vec<Row>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Row>, BoxError> {
     let rpc_addr = format!("http://localhost:26659/shares/height/{}", height);
     let resp = reqwest::get(rpc_addr).await?.text().await?;
     let response: SharesResponse = serde_json::from_str(&resp)?;
