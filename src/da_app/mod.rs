@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use prost::Message;
 use sovereign_sdk::{
-    da::{self, TxWithSender},
+    da::{self, BlockHash, TxWithSender},
+    zk_utils::traits::serial::{Deser, Serialize},
     Bytes,
 };
 
@@ -24,7 +25,7 @@ use proofs::*;
 use self::address::CelestiaAddress;
 
 pub struct CelestiaApp {
-    pub db: HashMap<tendermint::Hash, FilteredCelestiaBlock>,
+    pub db: HashMap<TmHash, FilteredCelestiaBlock>,
 }
 
 impl TxWithSender<CelestiaAddress> for BlobWithSender {
@@ -37,9 +38,39 @@ impl TxWithSender<CelestiaAddress> for BlobWithSender {
         self.blob.clone().into_iter()
     }
 }
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+
+pub struct TmHash(pub tendermint::Hash);
+
+impl AsRef<[u8]> for TmHash {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl AsRef<TmHash> for tendermint::Hash {
+    fn as_ref(&self) -> &TmHash {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl BlockHash for TmHash {}
+
+impl Deser for TmHash {
+    fn deser(
+        target: &mut &[u8],
+    ) -> Result<Self, sovereign_sdk::zk_utils::traits::serial::DeserializationError> {
+        todo!()
+    }
+}
+impl Serialize for TmHash {
+    fn serialize(&self, target: &mut impl std::io::Write) {
+        todo!()
+    }
+}
 
 impl da::DaApp for CelestiaApp {
-    type Blockhash = tendermint::Hash;
+    type Blockhash = TmHash;
 
     type Address = CelestiaAddress;
 
@@ -55,9 +86,9 @@ impl da::DaApp for CelestiaApp {
 
     const ADDRESS_LENGTH: usize = 20;
 
-    const RELATIVE_GENESIS: Self::Blockhash = tendermint::Hash::Sha256(hex!(
+    const RELATIVE_GENESIS: Self::Blockhash = TmHash(tendermint::Hash::Sha256(hex!(
         "7D99C8487B0914AA6851549CD59440FAFC20697B9029DF7AD07A681A50ACA747"
-    ));
+    )));
 
     fn get_relevant_txs(&self, blockhash: &Self::Blockhash) -> Vec<Self::BlobTransaction> {
         let filtered_block = self

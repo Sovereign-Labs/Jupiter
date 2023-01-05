@@ -2,7 +2,11 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 
 use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
-use sovereign_sdk::{da::DaService, Bytes};
+use sovereign_sdk::{
+    da::{DaService, SlotData},
+    zk_utils::traits::serial::{Deser, Serialize},
+    Bytes,
+};
 use tendermint::merkle;
 
 // 0x736f762d74657374 = b"sov-test"
@@ -32,6 +36,20 @@ pub struct FilteredCelestiaBlock {
     pub rollup_rows: Vec<Row>,
     pub etx_rows: Vec<Row>,
 }
+
+impl Serialize for FilteredCelestiaBlock {
+    fn serialize(&self, target: &mut impl std::io::Write) {
+        todo!()
+    }
+}
+impl Deser for FilteredCelestiaBlock {
+    fn deser(
+        target: &mut &[u8],
+    ) -> Result<Self, sovereign_sdk::zk_utils::traits::serial::DeserializationError> {
+        todo!()
+    }
+}
+impl SlotData for FilteredCelestiaBlock {}
 
 impl FilteredCelestiaBlock {
     pub fn square_size(&self) -> usize {
@@ -76,7 +94,7 @@ impl CelestiaHeader {
             .header
             .data_hash
             .ok_or(ValidationError::MissingDataHash)?;
-        if &root != data_hash.as_ref() {
+        if &root != <tendermint::Hash as AsRef<[u8]>>::as_ref(&data_hash) {
             return Err(ValidationError::InvalidDataRoot);
         }
         Ok(())

@@ -8,7 +8,7 @@ use sovereign_sdk::core::traits::{Address, Blockheader, CanonicalHash};
 const NAMESPACED_HASH_LEN: usize = 48;
 
 use crate::{
-    da_app::address::CelestiaAddress,
+    da_app::{address::CelestiaAddress, TmHash},
     da_service::TRANSACTIONS_NAMESPACE,
     payment::MsgPayForData,
     shares::{Blob, BlobRefIterator, NamespaceGroup},
@@ -79,10 +79,10 @@ impl CelestiaHeader {
 }
 
 impl CanonicalHash for CelestiaHeader {
-    type Output = tendermint::Hash;
+    type Output = TmHash;
 
     fn hash(&self) -> Self::Output {
-        self.header.hash()
+        TmHash(self.header.hash())
     }
 }
 
@@ -93,15 +93,15 @@ pub struct BlobWithSender {
 }
 
 impl Blockheader for CelestiaHeader {
-    type Hash = tendermint::Hash;
+    type Hash = TmHash;
 
     fn prev_hash(&self) -> &Self::Hash {
-        &self
-            .header
+        self.header
             .last_block_id
             .as_ref()
             .expect("must not call prev_hash on block with no predecessor")
             .hash
+            .as_ref()
     }
 }
 
