@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use prost::Message;
 use sovereign_sdk::{
     da::{self, BlockHash, TxWithSender},
-    zk_utils::traits::serial::{Deser, Serialize},
+    serial::{Deser, Serialize},
     Bytes,
 };
 
@@ -57,9 +57,7 @@ impl AsRef<TmHash> for tendermint::Hash {
 impl BlockHash for TmHash {}
 
 impl Deser for TmHash {
-    fn deser(
-        target: &mut &[u8],
-    ) -> Result<Self, sovereign_sdk::zk_utils::traits::serial::DeserializationError> {
+    fn deser(target: &mut &[u8]) -> Result<Self, sovereign_sdk::serial::DeserializationError> {
         todo!()
     }
 }

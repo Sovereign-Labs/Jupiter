@@ -3,8 +3,8 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
 use sovereign_sdk::{
-    da::{DaService, SlotData},
-    zk_utils::traits::serial::{Deser, Serialize},
+    serial::{Deser, Serialize},
+    services::da::{DaService, SlotData},
     Bytes,
 };
 use tendermint::merkle;
@@ -43,9 +43,7 @@ impl Serialize for FilteredCelestiaBlock {
     }
 }
 impl Deser for FilteredCelestiaBlock {
-    fn deser(
-        target: &mut &[u8],
-    ) -> Result<Self, sovereign_sdk::zk_utils::traits::serial::DeserializationError> {
+    fn deser(target: &mut &[u8]) -> Result<Self, sovereign_sdk::serial::DeserializationError> {
         todo!()
     }
 }

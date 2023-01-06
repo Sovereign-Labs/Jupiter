@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
 use jupiter::{da_app::CelestiaApp, da_service::CelestiaService};
-use sovereign_sdk::{
-    core::traits::CanonicalHash,
-    da::{DaApp, DaService},
-};
+use sovereign_sdk::{core::traits::CanonicalHash, da::DaApp, services::da::DaService};
 
 // const ROLLUP_NAMESPACE: [u8; 8] = *b"sov-test";
 
