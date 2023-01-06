@@ -4,9 +4,9 @@ version = 3
 
 [[package]]
 name = "anyhow"
-version = "1.0.66"
+version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "216261ddc8289130e551ddcd5ce8a064710c0d064a4d2895c67151c92b5443f6"
+checksum = "2cb2f989d18dd141ab8ae82f64d1a8cdd37e0840f73a406896cf5e99502fab61"
 
 [[package]]
 name = "autocfg"
@@ -563,6 +563,7 @@ checksum = "4217ad341ebadf8d8e724e264f13e593e0648f5b3e94b3896a5df283be015ecc"
 [[package]]
 name = "jmt"
 version = "0.1.0"
+source = "git+https://github.com/penumbra-zone/jmt.git?rev=18eb03cf053d15799ee3aa0c09b56c9f44485175#18eb03cf053d15799ee3aa0c09b56c9f44485175"
 dependencies = [
  "anyhow",
  "bcs",
@@ -594,9 +595,11 @@ dependencies = [
 name = "jupiter"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64",
  "hex",
  "hex-literal",
+ "nmt-rs",
  "prost 0.11.3",
  "prost-build",
  "prost-types",
@@ -700,6 +703,15 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nmt-rs"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "serde",
+ "sha2 0.10.6",
 ]
 
 [[package]]
@@ -1372,9 +1384,11 @@ dependencies = [
 name = "sovereign-sdk"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "jmt",
  "sha2 0.10.6",
+ "thiserror",
 ]
 
 [[package]]
@@ -1490,18 +1504,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.37"
+version = "1.0.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10deb33631e3c9018b9baf9dcbbc4f737320d2b576bac10f6aefa048fa407e3e"
+checksum = "6a9cd18aa97d5c45c6603caea1da6628790b37f7a34b6ca89522331c5180fed0"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.37"
+version = "1.0.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "982d17546b47146b28f7c22e3d08465f6b8903d0ea13c1660d9d84a6e7adcdbb"
+checksum = "1fb327af4685e4d03fa8cbcf1716380da910eeb2bb8be417e7f9fd3fb164f36f"
 dependencies = [
  "proc-macro2 1.0.47",
  "quote 1.0.21",

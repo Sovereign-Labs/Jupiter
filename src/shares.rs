@@ -42,14 +42,14 @@ const SHARE_SIZE: usize = 512;
 /// The size of base64 encoded share, in bytes
 const B64_SHARE_SIZE: usize = 684;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 /// A group of shares, in a single namespace
 pub enum NamespaceGroup {
     Compact(Vec<Share>),
     Sparse(Vec<Share>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum Share {
     Continuation(Bytes),
     Start(Bytes),

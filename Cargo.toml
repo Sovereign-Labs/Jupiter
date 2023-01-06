@@ -26,7 +26,7 @@ hex-literal = "0.3.4"
 base64 = "0.13.1"
 anyhow = "1.0.62"
 
-nmt-rs = { path = "../nmt-rs" }
+nmt-rs = { path = "../nmt-rs", features = ["serde"] }
 #nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git", revision = "fe1809a728c2370a5ddb220547375a59e87a08b7" }
 
 [build-dependencies]

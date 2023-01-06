@@ -27,10 +27,11 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct CelestiaService;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
 pub struct FilteredCelestiaBlock {
     pub header: CelestiaHeader,
     pub rollup_data: NamespaceGroup,
+    #[serde(skip)]
     pub relevant_etxs: HashMap<Bytes, (MsgPayForData, TxPosition)>,
     /// All rows in the block which contain rollup or e-tx data
     pub rollup_rows: Vec<Row>,
@@ -39,12 +40,13 @@ pub struct FilteredCelestiaBlock {
 
 impl Serialize for FilteredCelestiaBlock {
     fn serialize(&self, target: &mut impl std::io::Write) {
-        todo!()
+        serde_json::to_writer(target, self);
     }
 }
 impl Deser for FilteredCelestiaBlock {
     fn deser(target: &mut &[u8]) -> Result<Self, sovereign_sdk::serial::DeserializationError> {
-        todo!()
+        let output = serde_json::from_slice(target).expect("Deserialization should work for now");
+        Ok(output)
     }
 }
 impl SlotData for FilteredCelestiaBlock {}
@@ -176,7 +178,7 @@ pub struct SharesResponse {
     // height: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 pub struct Row {
     pub shares: Vec<Share>,
     pub root: NamespacedHash,

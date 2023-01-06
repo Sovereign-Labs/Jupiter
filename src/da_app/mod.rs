@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use prost::Message;
+use serde::Deserialize;
 use sovereign_sdk::{
     da::{self, BlockHash, TxWithSender},
     serial::{Deser, Serialize},
@@ -38,7 +39,7 @@ impl TxWithSender<CelestiaAddress> for BlobWithSender {
         self.blob.clone().into_iter()
     }
 }
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash, serde::Serialize, Deserialize)]
 
 pub struct TmHash(pub tendermint::Hash);
 
@@ -58,12 +59,18 @@ impl BlockHash for TmHash {}
 
 impl Deser for TmHash {
     fn deser(target: &mut &[u8]) -> Result<Self, sovereign_sdk::serial::DeserializationError> {
-        todo!()
+        // TODO: make this reasonable
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&target[..32]);
+        Ok(TmHash(tendermint::Hash::Sha256(out)))
     }
 }
 impl Serialize for TmHash {
     fn serialize(&self, target: &mut impl std::io::Write) {
-        todo!()
+        // TODO: make this reasonable
+        target
+            .write_all(self.as_ref())
+            .expect("Serialization should not fail")
     }
 }
 

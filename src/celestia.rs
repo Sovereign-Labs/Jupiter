@@ -22,7 +22,7 @@ pub struct MarshalledDataAvailabilityHeader {
     pub column_roots: Vec<String>,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Deserialize, serde::Serialize)]
 pub struct DataAvailabilityHeader {
     pub row_roots: Vec<NamespacedHash>,
     pub column_roots: Vec<NamespacedHash>,
@@ -66,7 +66,7 @@ pub struct NamespacedSharesResponse {
     pub height: u64,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Deserialize, serde::Serialize)]
 pub struct CelestiaHeader {
     pub dah: DataAvailabilityHeader,
     pub header: tendermint::block::Header,
@@ -178,7 +178,7 @@ pub fn parse_tx_namespace(
     Ok(pfbs)
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, Deserialize)]
 pub struct TxPosition {
     /// The half-open range of shares across which this transaction is serialized.
     /// For example a transaction which was split across shares 5,6, and 7 would have range 5..8
