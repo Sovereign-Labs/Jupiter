@@ -1,4 +1,4 @@
-use sovereign_sdk::core::traits::Address;
+use sovereign_sdk::core::traits::AddressTrait as Address;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CelestiaAddress(pub Vec<u8>);

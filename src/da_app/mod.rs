@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use prost::Message;
 use serde::Deserialize;
 use sovereign_sdk::{
-    da::{self, BlockHash, TxWithSender},
+    da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash},
     serial::{Deser, Serialize},
     Bytes,
 };
@@ -29,7 +29,7 @@ pub struct CelestiaApp {
     pub db: HashMap<TmHash, FilteredCelestiaBlock>,
 }
 
-impl TxWithSender<CelestiaAddress> for BlobWithSender {
+impl BlobTransactionTrait<CelestiaAddress> for BlobWithSender {
     type Data = BlobIterator;
     fn sender(&self) -> CelestiaAddress {
         self.sender.clone()
@@ -74,12 +74,12 @@ impl Serialize for TmHash {
     }
 }
 
-impl da::DaApp for CelestiaApp {
+impl da::DaLayerTrait for CelestiaApp {
     type Blockhash = TmHash;
 
     type Address = CelestiaAddress;
 
-    type Header = CelestiaHeader;
+    type BlockHeader = CelestiaHeader;
 
     type BlobTransaction = BlobWithSender;
 
@@ -152,7 +152,7 @@ impl da::DaApp for CelestiaApp {
     // and the sender matches the blob sender. Done
     fn verify_relevant_tx_list(
         &self,
-        blockheader: &Self::Header,
+        blockheader: &Self::BlockHeader,
         txs: &Vec<Self::BlobTransaction>,
         tx_proofs: Self::InclusionMultiProof,
         row_proofs: Self::CompletenessProof,

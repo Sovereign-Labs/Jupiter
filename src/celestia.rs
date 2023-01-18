@@ -3,7 +3,9 @@ use std::ops::Range;
 use nmt_rs::NamespacedHash;
 use prost::{bytes::Buf, encoding::decode_varint, Message};
 use serde::{Deserialize, Serialize};
-use sovereign_sdk::core::traits::{Address, Blockheader, CanonicalHash};
+use sovereign_sdk::core::traits::{
+    AddressTrait as Address, BlockheaderTrait as Blockheader, CanonicalHash,
+};
 
 const NAMESPACED_HASH_LEN: usize = 48;
 

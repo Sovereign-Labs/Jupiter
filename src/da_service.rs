@@ -40,11 +40,13 @@ pub struct FilteredCelestiaBlock {
 
 impl Serialize for FilteredCelestiaBlock {
     fn serialize(&self, target: &mut impl std::io::Write) {
+        // TODO: make this sensible!
         serde_json::to_writer(target, self);
     }
 }
 impl Deser for FilteredCelestiaBlock {
     fn deser(target: &mut &[u8]) -> Result<Self, sovereign_sdk::serial::DeserializationError> {
+        // TODO: make this sensible!
         let output = serde_json::from_slice(target).expect("Deserialization should work for now");
         Ok(output)
     }
