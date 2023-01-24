@@ -10,8 +10,9 @@ name = "testapp"
 path = "src/bin/main.rs" #
 
 [dependencies]
-sovereign-sdk =  { path = "../sovereign-sdk" }
-tendermint = "0.27"
+sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign-sdk", branch ="research" }
+tendermint = { path = "../tendermint-rs/tendermint" }
+
 
 prost = "0.11"
 prost-types = "0.11"
@@ -26,8 +27,8 @@ hex-literal = "0.3.4"
 base64 = "0.13.1"
 anyhow = "1.0.62"
 
-nmt-rs = { path = "../nmt-rs", features = ["serde"] }
-#nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git", revision = "fe1809a728c2370a5ddb220547375a59e87a08b7" }
+
+nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git", features = ["serde"] }
 
 [build-dependencies]
 prost-build = { version = "0.11" }
@@ -36,4 +37,4 @@ prost-build = { version = "0.11" }
 # This version of tendermint is identical to the upstream
 # except that the crate::serializers::from_str annotation has been
 # removed from some integer fields, and #[serde(default)] has been added to Consensus.app
-tendermint = { path = "../tendermint-rs/tendermint" }
+#tendermint = { path = "../tendermint-rs/tendermint" }
