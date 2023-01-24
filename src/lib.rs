@@ -11,7 +11,7 @@ mod utils;
 
 pub mod payment {
     include!(concat!(
-        concat!(env!("OUT_DIR"), "/celestia", "/gen"),
+        concat!(env!("OUT_DIR"), "/celestia"),
         "/payment.rs"
     ));
 }
