@@ -29,10 +29,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         exit(status.code().unwrap_or(-1))
     }
 
+    let _status = Command::new("mkdir")
+        .arg("-p")
+        .arg(out_dir.join("celestia-core"))
+        .status()
+        .unwrap();
     let status = Command::new("cp")
         .arg("-r")
         .arg(current_dir.join("celestia-core").join("rust").join("gen"))
-        .arg(out_dir.join("celestia-core"))
+        .arg(out_dir.join("celestia-core").join("gen"))
         .status()
         .unwrap();
     if !status.success() {
