@@ -1,0 +1,180 @@
+From 11f0b455b0e4d0bf6957ae61613c918b84427671 Mon Sep 17 00:00:00 2001
+From: Preston Evans <preston.b.evans@gmail.com>
+Date: Tue, 20 Dec 2022 09:48:34 -0600
+Subject: [PATCH] Add shares endpoint
+
+---
+ api/gateway/endpoints.go |  4 +++
+ api/gateway/share.go     | 73 ++++++++++++++++++++++++++++++++++++++++
+ share/service/service.go | 15 +++++++++
+ 3 files changed, 92 insertions(+)
+
+diff --git a/api/gateway/endpoints.go b/api/gateway/endpoints.go
+index 9e1c1b1..30a1638 100644
+--- a/api/gateway/endpoints.go
++++ b/api/gateway/endpoints.go
+@@ -27,6 +27,10 @@ func (h *Handler) RegisterEndpoints(rpc *Server) {
+ 		http.MethodPost)
+ 
+ 	// share endpoints
++	rpc.RegisterHandlerFunc(fmt.Sprintf("%s/height/{%s}", sharesEndpoint, heightKey),
++		h.handleSharesRequest, http.MethodGet)
++	rpc.RegisterHandlerFunc(fmt.Sprintf("%s", sharesEndpoint),
++		h.handleSharesRequest, http.MethodGet)
+ 	rpc.RegisterHandlerFunc(fmt.Sprintf("%s/{%s}/height/{%s}", namespacedSharesEndpoint, nIDKey, heightKey),
+ 		h.handleSharesByNamespaceRequest, http.MethodGet)
+ 	rpc.RegisterHandlerFunc(fmt.Sprintf("%s/{%s}", namespacedSharesEndpoint, nIDKey),
+diff --git a/api/gateway/share.go b/api/gateway/share.go
+index 303a0c3..0f7be27 100644
+--- a/api/gateway/share.go
++++ b/api/gateway/share.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"encoding/hex"
+ 	"encoding/json"
++	"fmt"
+ 	"net/http"
+ 	"strconv"
+ 
+@@ -12,12 +13,14 @@ import (
+ 	appshares "github.com/celestiaorg/celestia-app/pkg/shares"
+ 	"github.com/celestiaorg/celestia-node/header"
+ 	"github.com/celestiaorg/celestia-node/share"
++	"github.com/celestiaorg/celestia-node/share/service"
+ 	"github.com/celestiaorg/nmt/namespace"
+ )
+ 
+ const (
+ 	namespacedSharesEndpoint = "/namespaced_shares"
+ 	namespacedDataEndpoint   = "/namespaced_data"
++	sharesEndpoint           = "/shares"
+ )
+ 
+ var nIDKey = "nid"
+@@ -29,6 +32,13 @@ type NamespacedSharesResponse struct {
+ 	Height uint64        `json:"height"`
+ }
+ 
++// SharesResponse represents the response to a
++// Shares request.
++type SharesResponse struct {
++	Shares [][]share.Share `json:"shares"`
++	Height uint64          `json:"height"`
++}
++
+ // NamespacedDataResponse represents the response to a
+ // DataByNamespace request.
+ type NamespacedDataResponse struct {
+@@ -61,6 +71,31 @@ func (h *Handler) handleSharesByNamespaceRequest(w http.ResponseWriter, r *http.
+ 	}
+ }
+ 
++func (h *Handler) handleSharesRequest(w http.ResponseWriter, r *http.Request) {
++	height, err := parseGetSharesArgs(r)
++	if err != nil {
++		writeError(w, http.StatusBadRequest, sharesEndpoint, err)
++		return
++	}
++	shares, headerHeight, err := h.getAllShares(r.Context(), height)
++	if err != nil {
++		writeError(w, http.StatusInternalServerError, sharesEndpoint, err)
++		return
++	}
++	resp, err := json.Marshal(&SharesResponse{
++		Shares: shares,
++		Height: uint64(headerHeight),
++	})
++	if err != nil {
++		writeError(w, http.StatusInternalServerError, sharesEndpoint, err)
++		return
++	}
++	_, err = w.Write(resp)
++	if err != nil {
++		log.Errorw("serving request", "endpoint", sharesEndpoint, "err", err)
++	}
++}
++
+ func (h *Handler) handleDataByNamespaceRequest(w http.ResponseWriter, r *http.Request) {
+ 	height, nID, err := parseGetByNamespaceArgs(r)
+ 	if err != nil {
+@@ -91,6 +126,31 @@ func (h *Handler) handleDataByNamespaceRequest(w http.ResponseWriter, r *http.Re
+ 	}
+ }
+ 
++func (h *Handler) getAllShares(ctx context.Context, height uint64) ([][]share.Share, int64, error) {
++	// get header
++	var (
++		err    error
++		header *header.ExtendedHeader
++	)
++	switch height {
++	case 0:
++		header, err = h.header.Head(ctx)
++	default:
++		header, err = h.header.GetByHeight(ctx, height)
++	}
++	if err != nil {
++		return nil, 0, err
++	}
++	// perform request
++	if service, ok := h.share.(*service.ShareService); ok {
++		shares, err := service.GetExtendedShares(ctx, header.DAH)
++		return shares, header.Height, err
++	}
++
++	return nil, 0, fmt.Errorf("Invalid request for generic share service `getShares`. Upgrade your shareservice to use this endpoint")
++
++}
++
+ func (h *Handler) getShares(ctx context.Context, height uint64, nID namespace.ID) ([]share.Share, int64, error) {
+ 	// get header
+ 	var (
+@@ -123,6 +183,19 @@ func dataFromShares(shares []share.Share) ([][]byte, error) {
+ 	return data, nil
+ }
+ 
++func parseGetSharesArgs(r *http.Request) (height uint64, err error) {
++	vars := mux.Vars(r)
++	// if a height was given, parse it, otherwise get namespaced shares/data from the latest header
++	if strHeight, ok := vars[heightKey]; ok {
++		height, err = strconv.ParseUint(strHeight, 10, 64)
++		if err != nil {
++			return 0, err
++		}
++		return height, nil
++	}
++	return 0, nil
++}
++
+ func parseGetByNamespaceArgs(r *http.Request) (height uint64, nID namespace.ID, err error) {
+ 	vars := mux.Vars(r)
+ 	// if a height was given, parse it, otherwise get namespaced shares/data from the latest header
+diff --git a/share/service/service.go b/share/service/service.go
+index 6688159..034dd07 100644
+--- a/share/service/service.go
++++ b/share/service/service.go
+@@ -91,6 +91,21 @@ func (s *ShareService) GetShares(ctx context.Context, root *share.Root) ([][]sha
+ 	return shares, nil
+ }
+ 
++// GetExtendedShares returns all extended shares, in row-major order
++func (s *ShareService) GetExtendedShares(ctx context.Context, root *share.Root) ([][]share.Share, error) {
++	eds, err := s.rtrv.Retrieve(ctx, root)
++	if err != nil {
++		return nil, err
++	}
++
++	shares := make([][]share.Share, eds.Width())
++	for i := 0; i < int(eds.Width()); i++ {
++		shares[i] = eds.Row(uint(i))
++	}
++
++	return shares, nil
++}
++
+ // GetSharesByNamespace iterates over a square's row roots and accumulates the found shares in the
+ // given namespace.ID.
+ func (s *ShareService) GetSharesByNamespace(
+-- 
+2.34.0
+

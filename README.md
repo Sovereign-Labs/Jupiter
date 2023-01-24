@@ -24,12 +24,15 @@ The repository should now compile with `cargo build`!
 
 ### Set up Celestia
 
-Follow the steps [here](https://docs.celestia.org/nodes/light-node) to set up a Celestia light node running on the Arabica testnet.
+Set up a Celestia light node running on the Arabica testnet, and patch it to add the `shares` endpoint required by Jupiter.
 
-Use the `celestia version` command to verify that your new light client is running Celestia version `v0.5.0-rc5`. If not, the
-Juptier codebase may require changes to match upcoming tweaks to Celestia's data format.
-
-Jupiter assumes that the local Celestia node is running its RPC server on port 26659, so use something like the following command
-to start your Celestia node: `celestia light start --core.ip https://limani.celestia-devops.dev --gateway --gateway.port 26659`.
+1. Clone the repository: `git clone https://github.com/celestiaorg/celestia-node.git`.
+1. `cd celestia-node`
+1. Checkout the code at v0.6.1: `git reset --hard 3a58679ed84da966d01173f32780134c7b830594`
+1. Apply the patch file provided by jupiter to celestia-node: `git apply ../jupiter/0001-Add-shares-endpoint.patch`
+1. Install the required go version and build: `make go-install`
+1. Build celestia's key management tool `make cel-key`
+1. Initialize the node: `celestia light init`
+1. Start the node: `celestia light start --core.ip https://rpc-mocha.pops.one:9090 --gateway`
 
 Once your Celestia node is up and running, simply `cargo run` to test out the prototype.
