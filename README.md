@@ -30,9 +30,18 @@ Set up a Celestia light node running on the Arabica testnet, and patch it to add
 1. `cd celestia-node`
 1. Checkout the code at v0.6.1: `git reset --hard 3a58679ed84da966d01173f32780134c7b830594`
 1. Apply the patch file provided by jupiter to celestia-node: `git apply ../jupiter/0001-Add-shares-endpoint.patch`
-1. Install the required go version and build: `make go-install`
+1. Build and install the celestia binary: `make go-install`
 1. Build celestia's key management tool `make cel-key`
 1. Initialize the node: `celestia light init`
 1. Start the node: `celestia light start --core.ip https://rpc-mocha.pops.one:9090 --gateway`
 
 Once your Celestia node is up and running, simply `cargo run` to test out the prototype.
+
+## License
+
+Licensed under the [Apache License, Version
+2.0](./LICENSE).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this repository by you, as defined in the Apache-2.0 license, shall be
+licensed as above, without any additional terms or conditions.
