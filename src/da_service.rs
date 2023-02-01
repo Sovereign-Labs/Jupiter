@@ -3,7 +3,7 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
 use sovereign_sdk::{
-    serial::{Deser, Serialize},
+    serial::{Decode, Encode},
     services::da::{DaService, SlotData},
     Bytes,
 };
@@ -38,14 +38,15 @@ pub struct FilteredCelestiaBlock {
     pub etx_rows: Vec<Row>,
 }
 
-impl Serialize for FilteredCelestiaBlock {
-    fn serialize(&self, target: &mut impl std::io::Write) {
+impl Encode for FilteredCelestiaBlock {
+    fn encode(&self, target: &mut impl std::io::Write) {
         // TODO: make this sensible!
         serde_json::to_writer(target, self);
     }
 }
-impl Deser for FilteredCelestiaBlock {
-    fn deser(target: &mut &[u8]) -> Result<Self, sovereign_sdk::serial::DeserializationError> {
+impl Decode for FilteredCelestiaBlock {
+    type Error = sovereign_sdk::serial::DeserializationError;
+    fn decode(target: &mut &[u8]) -> Result<Self, Self::Error> {
         // TODO: make this sensible!
         let output = serde_json::from_slice(target).expect("Deserialization should work for now");
         Ok(output)
