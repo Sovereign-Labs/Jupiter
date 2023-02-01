@@ -8,6 +8,11 @@ suitable for production use. It contains known security flaws and numerous ineff
 The current version of Jupiter runs against Celestia-node version `v0.5.0-rc5`. This is the version used on the `arabica` testnet
 as of Dec 1, 2022.
 
+## Warning
+
+Jupiter is a research prototype. It contains knowns vulnerabilities and should not be used in production under any
+circumstances.
+
 ## Getting Started
 
 ### Compile Jupiter and its Protobuf Dependencies
