@@ -10,7 +10,7 @@ as of Dec 1, 2022.
 
 ## Warning
 
-Jupiter is a research prototype. It contains knowns vulnerabilities and should not be used in production under any
+Jupiter is a research prototype. It contains known vulnerabilities and should not be used in production under any
 circumstances.
 
 ## Getting Started
