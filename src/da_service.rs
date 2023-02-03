@@ -3,7 +3,7 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
 use sovereign_sdk::{
-    serial::{Decode, Encode},
+    serial::{Decode, DecodeBorrowed, Encode},
     services::da::{DaService, SlotData},
     Bytes,
 };
@@ -46,12 +46,22 @@ impl Encode for FilteredCelestiaBlock {
 }
 impl Decode for FilteredCelestiaBlock {
     type Error = sovereign_sdk::serial::DeserializationError;
-    fn decode(target: &mut &[u8]) -> Result<Self, Self::Error> {
-        // TODO: make this sensible!
-        let output = serde_json::from_slice(target).expect("Deserialization should work for now");
+
+    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
+        // TODO: Make this sensible
+        let output = serde_json::from_reader(target).expect("Deserialization should work for now");
         Ok(output)
     }
 }
+
+impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
+    type Error = sovereign_sdk::serial::DeserializationError;
+
+    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
+        Ok(serde_json::from_slice(target).expect("Deserialization should work for now"))
+    }
+}
+
 impl SlotData for FilteredCelestiaBlock {}
 
 impl FilteredCelestiaBlock {

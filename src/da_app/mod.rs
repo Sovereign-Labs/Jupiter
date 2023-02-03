@@ -4,7 +4,7 @@ use prost::Message;
 use serde::Deserialize;
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash},
-    serial::{Decode, Encode},
+    serial::{Decode, DecodeBorrowed, Encode},
     Bytes,
 };
 
@@ -59,13 +59,25 @@ impl BlockHash for TmHash {}
 
 impl Decode for TmHash {
     type Error = sovereign_sdk::serial::DeserializationError;
-    fn decode(target: &mut &[u8]) -> Result<Self, Self::Error> {
-        // TODO: make this reasonable
+
+    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
+        //  TODO: make this reasonable
+        let mut out = [0u8; 32];
+        target.read_exact(&mut out);
+        Ok(TmHash(tendermint::Hash::Sha256(out)))
+    }
+}
+
+impl<'de> DecodeBorrowed<'de> for TmHash {
+    type Error = sovereign_sdk::serial::DeserializationError;
+
+    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
         let mut out = [0u8; 32];
         out.copy_from_slice(&target[..32]);
         Ok(TmHash(tendermint::Hash::Sha256(out)))
     }
 }
+
 impl Encode for TmHash {
     fn encode(&self, target: &mut impl std::io::Write) {
         // TODO: make this reasonable
