@@ -7,6 +7,7 @@ pub use celestia::*;
 pub mod da_app;
 pub mod da_service;
 pub mod share_commit;
+pub mod types;
 mod utils;
 
 pub mod payment {

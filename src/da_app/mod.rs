@@ -4,7 +4,7 @@ use prost::Message;
 use serde::Deserialize;
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash},
-    serial::{Decode, DecodeBorrowed, Encode},
+    serial::{Decode, DecodeBorrowed, DeserializationError, Encode},
     Bytes,
 };
 
@@ -63,7 +63,12 @@ impl Decode for TmHash {
     fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
         //  TODO: make this reasonable
         let mut out = [0u8; 32];
-        target.read_exact(&mut out);
+        target
+            .read_exact(&mut out)
+            .map_err(|_| DeserializationError::DataTooShort {
+                expected: 32,
+                got: 1,
+            })?;
         Ok(TmHash(tendermint::Hash::Sha256(out)))
     }
 }
@@ -166,7 +171,7 @@ impl da::DaLayerTrait for CelestiaApp {
     fn verify_relevant_tx_list(
         &self,
         blockheader: &Self::BlockHeader,
-        txs: &Vec<Self::BlobTransaction>,
+        txs: &[Self::BlobTransaction],
         tx_proofs: Self::InclusionMultiProof,
         row_proofs: Self::CompletenessProof,
     ) -> Result<(), Self::Error> {

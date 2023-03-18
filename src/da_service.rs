@@ -1,5 +1,6 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
+use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
 use sovereign_sdk::{
@@ -8,6 +9,7 @@ use sovereign_sdk::{
     Bytes,
 };
 use tendermint::merkle;
+use tracing::{debug, info, span, Level};
 
 // 0x736f762d74657374 = b"sov-test"
 // pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId(b"sov-test");
@@ -19,13 +21,21 @@ use crate::{
     parse_tx_namespace,
     payment::MsgPayForData,
     shares::{NamespaceGroup, Share},
+    types::{ExtendedDataSquare, RpcNamespacedSharesResponse},
     utils::BoxError,
-    CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, NamespacedSharesResponse,
-    TxPosition,
+    CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, TxPosition,
 };
 
 #[derive(Debug, Clone)]
-pub struct CelestiaService;
+pub struct CelestiaService {
+    client: HttpClient,
+}
+
+impl CelestiaService {
+    pub fn with_client(client: HttpClient) -> Self {
+        Self { client }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
 pub struct FilteredCelestiaBlock {
@@ -41,7 +51,7 @@ pub struct FilteredCelestiaBlock {
 impl Encode for FilteredCelestiaBlock {
     fn encode(&self, target: &mut impl std::io::Write) {
         // TODO: make this sensible!
-        serde_json::to_writer(target, self);
+        serde_json::to_writer(target, self).expect("FilteredCelestiaBlock is json serializable");
     }
 }
 impl Decode for FilteredCelestiaBlock {
@@ -114,6 +124,51 @@ impl CelestiaHeader {
     }
 }
 
+impl CelestiaService {}
+
+/// Fetch the rollup namespace shares and etx data. Returns a tuple `(rollup_shares, etx_shares)`
+pub async fn fetch_needed_shares_by_header(
+    client: &HttpClient,
+    header: &serde_json::Value,
+) -> Result<(NamespaceGroup, NamespaceGroup), BoxError> {
+    let dah = header
+        .get("dah")
+        .ok_or(BoxError::msg("missing dah in block header"))?;
+    let rollup_namespace_str = base64::encode(ROLLUP_NAMESPACE).into();
+    let rollup_shares_future = {
+        let params: Vec<&serde_json::Value> = vec![dah, &rollup_namespace_str];
+        client.request::<RpcNamespacedSharesResponse, _>("share.GetSharesByNamespace", params)
+    };
+
+    let etx_namespace_str = base64::encode(TRANSACTIONS_NAMESPACE).into();
+    let etx_shares_future = {
+        let params: Vec<&serde_json::Value> = vec![dah, &etx_namespace_str];
+        client.request::<RpcNamespacedSharesResponse, _>("share.GetSharesByNamespace", params)
+    };
+
+    let (rollup_shares_resp, etx_shares_resp) =
+        tokio::join!(rollup_shares_future, etx_shares_future);
+
+    let rollup_shares = NamespaceGroup::Sparse(
+        rollup_shares_resp?
+            .0
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|resp| resp.shares)
+            .collect(),
+    );
+    let tx_data = NamespaceGroup::Compact(
+        etx_shares_resp?
+            .0
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|resp| resp.shares)
+            .collect(),
+    );
+
+    Ok((rollup_shares, tx_data))
+}
+
 impl DaService for CelestiaService {
     type FilteredBlock = FilteredCelestiaBlock;
 
@@ -123,50 +178,58 @@ impl DaService for CelestiaService {
 
     type Error = BoxError;
 
-    fn get_finalized_at(height: usize) -> Self::Future<Self::FilteredBlock> {
+    fn get_finalized_at(&self, height: usize) -> Self::Future<Self::FilteredBlock> {
+        let client = self.client.clone();
         Box::pin(async move {
-            let rpc_addr = format!("http://localhost:26659/header/{}", height);
-            let raw_response = //if height != 45963 {
-                reqwest::get(rpc_addr).await?.text().await?;
-            let header_response: CelestiaHeaderResponse = serde_json::from_str(&raw_response)?;
+            let _span = span!(Level::TRACE, "fetching finalized block", height = height);
+            // Fetch the header and relevant shares via RPC
+            info!("Fetching header...");
+            let header = client
+                .request::<serde_json::Value, _>("header.GetByHeight", vec![height])
+                .await?;
+            debug!(header_result = ?header);
+            info!("Fetching shares...");
+            let (rollup_shares, tx_data) = fetch_needed_shares_by_header(&client, &header).await?;
 
-            let rpc_addr = format!(
-                "http://localhost:26659/namespaced_shares/{}/height/{}",
-                hex::encode(ROLLUP_NAMESPACE),
-                height
-            );
+            info!("Fetching EDS...");
+            // Fetch entire extended data square
+            let data_square = client
+                .request::<ExtendedDataSquare, _>(
+                    "share.GetEDS",
+                    vec![header
+                        .get("dah")
+                        .ok_or(BoxError::msg("missing dah in block header"))?],
+                )
+                .await?;
 
-            let body = reqwest::get(rpc_addr).await?.text().await?;
-            let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
-            let rollup_shares =
-                NamespaceGroup::from_b64_shares(&response.shares.unwrap_or_default())?;
+            let unmarshalled_header: CelestiaHeaderResponse = serde_json::from_value(header)?;
+            let dah: DataAvailabilityHeader = unmarshalled_header.dah.try_into()?;
+            info!("Parsing namespaces...");
+            // Parse out all of the rows containing etxs
+            let etx_rows = get_rows_containing_namespace(
+                TRANSACTIONS_NAMESPACE,
+                &dah,
+                data_square.rows()?.into_iter(),
+            )
+            .await?;
+            // Parse out all of the rows containing rollup data
+            let rollup_rows = get_rows_containing_namespace(
+                ROLLUP_NAMESPACE,
+                &dah,
+                data_square.rows()?.into_iter(),
+            )
+            .await?;
 
-            let rpc_addr = format!(
-                "http://localhost:26659/namespaced_shares/0000000000000001/height/{}",
-                height
-            );
-
-            let body = reqwest::get(rpc_addr).await?.text().await?;
-            let response: NamespacedSharesResponse = serde_json::from_str(&body)?;
-            let tx_data = NamespaceGroup::from_b64_shares(&response.shares.unwrap_or_default())?;
-
+            // Parse out the pfds and store them for later retrieval
             let pfds = parse_tx_namespace(tx_data)?;
-
             let mut pfd_map = HashMap::new();
-
             for tx in pfds {
                 pfd_map.insert(tx.0.message_share_commitment.clone(), tx);
             }
 
-            let dah = header_response.dah.try_into()?;
-            let etx_rows =
-                get_rows_containing_namespace(height, TRANSACTIONS_NAMESPACE, &dah).await?;
-            let rollup_rows = get_rows_containing_namespace(height, ROLLUP_NAMESPACE, &dah).await?;
-
-            // let original_rows = &header_response.dah.row_roots;
             let filtered_block = FilteredCelestiaBlock {
                 header: CelestiaHeader {
-                    header: header_response.header,
+                    header: unmarshalled_header.header,
                     dah,
                 },
                 rollup_data: rollup_shares,
@@ -179,16 +242,9 @@ impl DaService for CelestiaService {
         })
     }
 
-    fn get_block_at(height: usize) -> Self::Future<Self::FilteredBlock> {
-        Self::get_finalized_at(height)
+    fn get_block_at(&self, height: usize) -> Self::Future<Self::FilteredBlock> {
+        self.get_finalized_at(height)
     }
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct SharesResponse {
-    #[serde(rename = "shares")]
-    rows: Vec<Vec<Share>>,
-    // height: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
@@ -217,18 +273,16 @@ impl Row {
 }
 
 async fn get_rows_containing_namespace(
-    height: usize,
     nid: NamespaceId,
     dah: &DataAvailabilityHeader,
+    data_square_rows: impl Iterator<Item = &[Share]>,
 ) -> Result<Vec<Row>, BoxError> {
-    let rpc_addr = format!("http://localhost:26659/shares/height/{}", height);
-    let resp = reqwest::get(rpc_addr).await?.text().await?;
-    let response: SharesResponse = serde_json::from_str(&resp)?;
-    let mut output = Vec::new();
-    for (row, root) in response.rows.into_iter().zip(dah.row_roots.iter()) {
+    let mut output = vec![];
+
+    for (row, root) in data_square_rows.zip(dah.row_roots.iter()) {
         if root.contains(nid) {
             output.push(Row {
-                shares: row,
+                shares: row.to_vec(),
                 root: root.clone(),
             })
         }
