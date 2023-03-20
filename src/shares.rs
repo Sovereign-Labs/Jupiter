@@ -55,6 +55,15 @@ pub enum Share {
     Start(Bytes),
 }
 
+impl AsRef<[u8]> for Share {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Share::Continuation(c) => c.as_ref(),
+            Share::Start(s) => s.as_ref(),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Share {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

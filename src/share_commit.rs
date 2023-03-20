@@ -96,20 +96,19 @@ fn next_lower_power_of_2(num: usize) -> usize {
 }
 
 mod nmt {
-    use nmt_rs::{CelestiaNmt, NamespaceId};
-    /// Build an nmt from leaves that are already prefixed with their namespace
-    pub fn build_nmt_from_namespaced_leaves(namespaced_leaves: &[impl AsRef<[u8]>]) -> [u8; 48] {
-        let mut tree = CelestiaNmt::new();
-        for leaf in namespaced_leaves.iter() {
-            let namespace: NamespaceId = leaf.as_ref()[..8]
-                .as_ref()
-                .try_into()
-                .expect("Namespace length is correct");
-            tree.push_leaf(&leaf.as_ref()[8..], namespace)
-                .expect("Leaves are pushed in order");
-        }
-        tree.root().0
-    }
+    // /// Build an nmt from leaves that are already prefixed with their namespace
+    // pub fn build_nmt_from_namespaced_leaves(namespaced_leaves: &[impl AsRef<[u8]>]) -> [u8; 48] {
+    //     let mut tree = CelestiaNmt::new();
+    //     for leaf in namespaced_leaves.iter() {
+    //         let namespace: NamespaceId = leaf.as_ref()[..8]
+    //             .as_ref()
+    //             .try_into()
+    //             .expect("Namespace length is correct");
+    //         tree.push_leaf(&leaf.as_ref()[8..], namespace)
+    //             .expect("Leaves are pushed in order");
+    //     }
+    //     tree.root().0
+    // }
 
     // pub fn build_nmt(leaves: &[(impl AsRef<[u8]>, NamespaceId)]) -> [u8; 48] {
     //     let mut tree = CelestiaNmt::new();
