@@ -10,7 +10,7 @@ name = "testapp"
 path = "src/bin/main.rs" #
 
 [dependencies]
-sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign-sdk" }
+sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git" }
 tendermint = "0.27"
 
 prost = "0.11"
