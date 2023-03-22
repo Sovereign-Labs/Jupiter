@@ -45,20 +45,6 @@ impl CompletenessProof {
 
 pub struct CorrectnessProof(pub Vec<EtxProof>);
 
-// fn split_at_row_boundary(square_size: usize, range: Range<usize>) -> Vec<Range<usize>> {
-//     let mut output = Vec::new();
-//     loop {
-//         let start_of_next_row = (range.start / square_size) + square_size;
-//         if range.end <= start_of_next_row {
-//             output.push(range.start..range.end);
-//             return output;
-//         } else {
-//             output.push(range.start..start_of_next_row);
-//             range.start = start_of_next_row;
-//         }
-//     }
-// }
-
 impl CorrectnessProof {
     pub fn for_block(block: &FilteredCelestiaBlock, relevant_txs: &Vec<BlobWithSender>) -> Self {
         let mut needed_tx_shares = Vec::new();
@@ -69,7 +55,7 @@ impl CorrectnessProof {
                 .expect("commitment is valid");
 
             let (_, position) = block
-                .relevant_etxs
+                .relevant_pfbs
                 .get(&commitment[..])
                 .expect("commitment must exist in map");
             needed_tx_shares.push(position.clone());
@@ -79,7 +65,7 @@ impl CorrectnessProof {
         let mut current_tx_proof: EtxProof = EtxProof { proof: Vec::new() };
         let mut tx_proofs: Vec<EtxProof> = Vec::with_capacity(relevant_txs.len());
 
-        for (row_idx, row) in block.etx_rows.iter().enumerate() {
+        for (row_idx, row) in block.pfb_rows.iter().enumerate() {
             let mut nmt = row.merklized();
             while let Some(next_needed_share) = needed_tx_shares.peek_mut() {
                 // If the next needed share falls in this row

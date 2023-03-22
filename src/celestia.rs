@@ -1,7 +1,8 @@
 use std::ops::Range;
 
+use borsh::{BorshDeserialize, BorshSerialize};
 use nmt_rs::NamespacedHash;
-use prost::{bytes::Buf, encoding::decode_varint, Message};
+use prost::{bytes::Buf, Message};
 use serde::{Deserialize, Serialize};
 use sovereign_sdk::core::traits::{
     AddressTrait as Address, BlockheaderTrait as Blockheader, CanonicalHash,
@@ -11,11 +12,10 @@ const NAMESPACED_HASH_LEN: usize = 48;
 
 use crate::{
     da_app::{address::CelestiaAddress, TmHash},
-    da_service::TRANSACTIONS_NAMESPACE,
-    payment::MsgPayForData,
-    shares::{Blob, BlobRefIterator, NamespaceGroup},
+    da_service::PFB_NAMESPACE,
+    pfb::{BlobTx, MsgPayForBlobs},
+    shares::{skip_varint, Blob, BlobRefIterator, NamespaceGroup},
     utils::BoxError,
-    MalleatedTx, Tx,
 };
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
@@ -24,7 +24,9 @@ pub struct MarshalledDataAvailabilityHeader {
     pub column_roots: Vec<String>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, serde::Serialize)]
+#[derive(
+    PartialEq, Debug, Clone, Deserialize, serde::Serialize, BorshDeserialize, BorshSerialize,
+)]
 pub struct DataAvailabilityHeader {
     pub row_roots: Vec<NamespacedHash>,
     pub column_roots: Vec<NamespacedHash>,
@@ -152,35 +154,26 @@ impl<'a> TryFrom<&'a [u8]> for H160 {
 }
 impl Address for H160 {}
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum TxType {
-    Pfd(MalleatedTx),
-    Other(Tx),
-}
-
-pub fn parse_tx_namespace(
+pub fn parse_pfb_namespace(
     group: NamespaceGroup,
-) -> Result<Vec<(MsgPayForData, TxPosition)>, BoxError> {
+) -> Result<Vec<(MsgPayForBlobs, TxPosition)>, BoxError> {
     if group.shares().len() == 0 {
         return Ok(vec![]);
     }
-    assert!(group.shares()[0].namespace() == TRANSACTIONS_NAMESPACE);
+    assert!(group.shares()[0].namespace() == PFB_NAMESPACE);
     let mut pfbs = Vec::new();
     for blob in group.blobs() {
         let mut data = blob.data();
-        println!("Total Data length: {}", data.remaining());
-
         while data.has_remaining() {
-            dbg!(data.remaining());
-            if let Some(tx) = next_e_tx(&mut data)? {
-                pfbs.push(tx)
-            }
+            pfbs.push(next_pfb(&mut data)?)
         }
     }
     Ok(pfbs)
 }
 
-#[derive(Debug, PartialEq, Clone, serde::Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, serde::Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
 pub struct TxPosition {
     /// The half-open range of shares across which this transaction is serialized.
     /// For example a transaction which was split across shares 5,6, and 7 would have range 5..8
@@ -189,53 +182,27 @@ pub struct TxPosition {
     pub start_offset: usize,
 }
 
-fn next_e_tx(
-    mut data: &mut BlobRefIterator,
-) -> Result<Option<(MsgPayForData, TxPosition)>, BoxError> {
+fn next_pfb(mut data: &mut BlobRefIterator) -> Result<(MsgPayForBlobs, TxPosition), BoxError> {
     let (start_idx, start_offset) = data.current_position();
-    let len = decode_varint(&mut data).expect("Varint must be valid");
-    let backup = data.clone();
-    let tx = match MalleatedTx::decode(&mut data) {
-        Ok(malleated) => {
-            // The hash length must be 32
-            if malleated.original_tx_hash.len() != 32 {
-                *data = backup;
-                TxType::Other(Tx::decode(&mut data)?)
-            } else {
-                TxType::Pfd(malleated)
-            }
-        }
-        Err(_) => {
-            *data = backup;
-            data.advance(len as usize);
-            return Ok(None);
-        }
-    };
-
-    let sdk_tx = match tx {
-        TxType::Pfd(malleated) => {
-            let inner = malleated.tx.clone();
-            Tx::decode(inner)?
-        }
-        TxType::Other(_) => panic!("This tx is unmalleated and should ahve been skipped"),
-    };
-
-    let body = sdk_tx.body.expect("transaction must have body");
-    if body.messages.len() == 1 {
-        for msg in body.messages {
-            if msg.type_url != "/payment.MsgPayForData" {
-                panic!("This tx is not a pfd and should have been skipped")
-            }
-            let pfd = MsgPayForData::decode(std::io::Cursor::new(msg.value))?;
-            let current_share_idx = data.current_position().0;
-            return Ok(Some((
-                pfd,
-                TxPosition {
-                    share_range: start_idx..current_share_idx + 1,
-                    start_offset,
-                },
-            )));
-        }
+    let _len = skip_varint(&mut data).expect("Varint must be valid");
+    let blob_tx = BlobTx::decode(&mut data)?;
+    let messages = blob_tx
+        .tx
+        .ok_or(anyhow::format_err!("No tx body in blob tx"))?
+        .body
+        .ok_or(anyhow::format_err!("No body in cosmos tx"))?
+        .messages;
+    if messages.len() != 1 {
+        return Err(anyhow::format_err!("Expected 1 message in cosmos tx"));
     }
-    Ok(None)
+    let pfb = MsgPayForBlobs::decode(&mut &messages[0].value[..])?;
+    let current_share_idx = data.current_position().0;
+
+    Ok((
+        pfb,
+        TxPosition {
+            share_range: start_idx..current_share_idx + 1,
+            start_offset,
+        },
+    ))
 }
