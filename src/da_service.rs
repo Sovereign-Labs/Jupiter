@@ -1,5 +1,6 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
+use borsh::{BorshDeserialize, BorshSerialize};
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
 use serde::Deserialize;
@@ -14,12 +15,12 @@ use tracing::{debug, info, span, Level};
 // 0x736f762d74657374 = b"sov-test"
 // pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId(b"sov-test");
 pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId([115, 111, 118, 45, 116, 101, 115, 116]);
-pub const TRANSACTIONS_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000000001"));
+pub const PFB_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000000004"));
 pub const PARITY_SHARES_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("ffffffffffffffff"));
 
 use crate::{
-    parse_tx_namespace,
-    payment::MsgPayForData,
+    parse_pfb_namespace,
+    pfb::MsgPayForBlobs,
     shares::{NamespaceGroup, Share},
     types::{ExtendedDataSquare, RpcNamespacedSharesResponse},
     utils::BoxError,
@@ -41,39 +42,38 @@ impl CelestiaService {
 pub struct FilteredCelestiaBlock {
     pub header: CelestiaHeader,
     pub rollup_data: NamespaceGroup,
-    #[serde(skip)]
-    pub relevant_etxs: HashMap<Bytes, (MsgPayForData, TxPosition)>,
-    /// All rows in the block which contain rollup or e-tx data
+    /// A mapping from blob commitment to the PFB containing that commitment
+    /// for each blob addressed to the rollup namespace
+    pub relevant_pfbs: HashMap<Bytes, (MsgPayForBlobs, TxPosition)>,
+    /// All rows in the extended data square which contain rollup data
     pub rollup_rows: Vec<Row>,
-    pub etx_rows: Vec<Row>,
+    /// All rows in the extended data square which contain pfb data
+    pub pfb_rows: Vec<Row>,
 }
 
 impl Encode for FilteredCelestiaBlock {
     fn encode(&self, target: &mut impl std::io::Write) {
-        // TODO: make this sensible!
-        serde_json::to_writer(target, self).expect("FilteredCelestiaBlock is json serializable");
+        serde_cbor::ser::to_writer(target, self).expect("serializing to writer should not fail");
     }
 }
+
 impl Decode for FilteredCelestiaBlock {
-    type Error = sovereign_sdk::serial::DeserializationError;
+    type Error = anyhow::Error;
 
     fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
-        // TODO: Make this sensible
-        let output = serde_json::from_reader(target).expect("Deserialization should work for now");
-        Ok(output)
+        Ok(serde_cbor::de::from_reader(target)?)
     }
 }
 
 impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
-    type Error = sovereign_sdk::serial::DeserializationError;
+    type Error = anyhow::Error;
 
     fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
-        Ok(serde_json::from_slice(target).expect("Deserialization should work for now"))
+        Ok(serde_cbor::de::from_slice(target)?)
     }
 }
 
 impl SlotData for FilteredCelestiaBlock {}
-
 impl FilteredCelestiaBlock {
     pub fn square_size(&self) -> usize {
         self.header.square_size()
@@ -99,8 +99,9 @@ impl FilteredCelestiaBlock {
 pub enum ValidationError {
     MissingDataHash,
     InvalidDataRoot,
-    InvalidEtxProof,
+    InvalidEtxProof(&'static str),
     MissingTx,
+    InvalidRowProof,
     InvalidSigner,
 }
 
@@ -140,7 +141,7 @@ pub async fn fetch_needed_shares_by_header(
         client.request::<RpcNamespacedSharesResponse, _>("share.GetSharesByNamespace", params)
     };
 
-    let etx_namespace_str = base64::encode(TRANSACTIONS_NAMESPACE).into();
+    let etx_namespace_str = base64::encode(PFB_NAMESPACE).into();
     let etx_shares_future = {
         let params: Vec<&serde_json::Value> = vec![dah, &etx_namespace_str];
         client.request::<RpcNamespacedSharesResponse, _>("share.GetSharesByNamespace", params)
@@ -206,12 +207,9 @@ impl DaService for CelestiaService {
             let dah: DataAvailabilityHeader = unmarshalled_header.dah.try_into()?;
             info!("Parsing namespaces...");
             // Parse out all of the rows containing etxs
-            let etx_rows = get_rows_containing_namespace(
-                TRANSACTIONS_NAMESPACE,
-                &dah,
-                data_square.rows()?.into_iter(),
-            )
-            .await?;
+            let etx_rows =
+                get_rows_containing_namespace(PFB_NAMESPACE, &dah, data_square.rows()?.into_iter())
+                    .await?;
             // Parse out all of the rows containing rollup data
             let rollup_rows = get_rows_containing_namespace(
                 ROLLUP_NAMESPACE,
@@ -221,10 +219,16 @@ impl DaService for CelestiaService {
             .await?;
 
             // Parse out the pfds and store them for later retrieval
-            let pfds = parse_tx_namespace(tx_data)?;
+            let pfds = parse_pfb_namespace(tx_data)?;
             let mut pfd_map = HashMap::new();
             for tx in pfds {
-                pfd_map.insert(tx.0.message_share_commitment.clone(), tx);
+                for (idx, nid) in tx.0.namespace_ids.iter().enumerate() {
+                    if nid == &ROLLUP_NAMESPACE.0[..] {
+                        // TODO: Retool this map to avoid cloning txs
+                        pfd_map.insert(tx.0.share_commitments[idx].clone(), tx.clone());
+                        println!("Found PFD for {:?}", &tx.0.share_commitments[idx]);
+                    }
+                }
             }
 
             let filtered_block = FilteredCelestiaBlock {
@@ -233,9 +237,9 @@ impl DaService for CelestiaService {
                     dah,
                 },
                 rollup_data: rollup_shares,
-                relevant_etxs: pfd_map,
+                relevant_pfbs: pfd_map,
                 rollup_rows,
-                etx_rows,
+                pfb_rows: etx_rows,
             };
 
             Ok::<Self::FilteredBlock, BoxError>(filtered_block)
@@ -247,7 +251,9 @@ impl DaService for CelestiaService {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, Deserialize, BorshDeserialize, BorshSerialize,
+)]
 pub struct Row {
     pub shares: Vec<Share>,
     pub root: NamespacedHash,
@@ -288,4 +294,44 @@ async fn get_rows_containing_namespace(
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        parse_pfb_namespace,
+        shares::{NamespaceGroup, Share},
+    };
+    const SERIALIZED_PFB_SHARES: &'static str = r#"["AAAAAAAAAAQBAAABRQAAABHDAgq3AgqKAQqHAQogL2NlbGVzdGlhLmJsb2IudjEuTXNnUGF5Rm9yQmxvYnMSYwovY2VsZXN0aWExemZ2cnJmYXE5dWQ2Zzl0NGt6bXNscGYyNHlzYXhxZm56ZWU1dzkSCHNvdi10ZXN0GgEoIiCB8FoaUuOPrX2wFBbl4MnWY3qE72tns7sSY8xyHnQtr0IBABJmClAKRgofL2Nvc21vcy5jcnlwdG8uc2VjcDI1NmsxLlB1YktleRIjCiEDmXaTf6RVIgUVdG0XZ6bqecEn8jWeAi+LjzTis5QZdd4SBAoCCAEYARISCgwKBHV0aWESBDIwMDAQgPEEGkAhq2CzD1DqxsVXIriANXYyLAmJlnnt8YTNXiwHgMQQGUbl65QUe37UhnbNVrOzDVYK/nQV9TgI+5NetB2JbIz6EgEBGgRJTkRYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]"#;
+    const SERIALIZED_ROLLUP_DATA_SHARES: &'static str = r#"["c292LXRlc3QBAAAAKHsia2V5IjogInRlc3RrZXkiLCAidmFsdWUiOiAidGVzdHZhbHVlIn0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]"#;
+
+    #[test]
+    fn test_get_pfbs() {
+        // the following test case is taken from arabica-6, block 275345
+        let shares: Vec<Share> =
+            serde_json::from_str(SERIALIZED_PFB_SHARES).expect("failed to deserialize pfb shares");
+
+        assert!(shares.len() == 1);
+
+        let pfb_ns = NamespaceGroup::Compact(shares);
+        let pfbs = parse_pfb_namespace(pfb_ns).expect("failed to parse pfb shares");
+        assert!(pfbs.len() == 1);
+    }
+
+    #[test]
+    fn test_get_rollup_data() {
+        let shares: Vec<Share> = serde_json::from_str(SERIALIZED_ROLLUP_DATA_SHARES)
+            .expect("failed to deserialize pfb shares");
+
+        let rollup_ns_group = NamespaceGroup::Sparse(shares);
+        let mut blobs = rollup_ns_group.blobs();
+        let first_blob = blobs
+            .next()
+            .expect("iterator should contain exactly one blob");
+
+        let found_data: Vec<u8> = first_blob.data().collect();
+        assert!(&found_data == r#"{"key": "testkey", "value": "testvalue"}"#.as_bytes());
+
+        assert!(blobs.next().is_none());
+    }
 }

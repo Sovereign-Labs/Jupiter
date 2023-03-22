@@ -1,7 +1,8 @@
 use std::fmt::Display;
 
 use base64::STANDARD;
-use nmt_rs::NamespaceId;
+use borsh::{BorshDeserialize, BorshSerialize};
+use nmt_rs::{NamespaceId, NAMESPACE_ID_LEN};
 use prost::{
     bytes::{Buf, BytesMut},
     encoding::decode_varint,
@@ -12,8 +13,16 @@ use sovereign_sdk::{
     core::crypto::hash::{sha2, Sha2Hash},
     Bytes,
 };
+use tracing::error;
 
-use crate::da_service::TRANSACTIONS_NAMESPACE;
+use crate::da_service::PFB_NAMESPACE;
+
+/// The length of the "reserved bytes" field in a compact share
+pub const RESERVED_BYTES_LEN: usize = 4;
+/// The length of the "info byte" field in a compact share
+pub const INFO_BYTE_LEN: usize = 1;
+/// The length of the "sequence length" field
+pub const SEQUENCE_LENGTH_BYTES: usize = 4;
 
 /// Skip over a varint. Returns the number of bytes read
 pub fn skip_varint(mut bytes: impl Buf) -> Result<usize, ErrInvalidVarint> {
@@ -42,14 +51,16 @@ const SHARE_SIZE: usize = 512;
 /// The size of base64 encoded share, in bytes
 const B64_SHARE_SIZE: usize = 684;
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, Deserialize, BorshDeserialize, BorshSerialize,
+)]
 /// A group of shares, in a single namespace
 pub enum NamespaceGroup {
     Compact(Vec<Share>),
     Sparse(Vec<Share>),
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, BorshDeserialize, BorshSerialize)]
 pub enum Share {
     Continuation(Bytes),
     Start(Bytes),
@@ -69,7 +80,7 @@ impl<'de> Deserialize<'de> for Share {
     where
         D: serde::Deserializer<'de>,
     {
-        let mut share = Bytes::deserialize(deserializer)?;
+        let mut share = <sovereign_sdk::Bytes as Deserialize>::deserialize(deserializer)?;
         if share.len() == B64_SHARE_SIZE {
             let mut decoded = BytesMut::with_capacity(SHARE_SIZE);
             unsafe { decoded.set_len(SHARE_SIZE) }
@@ -129,7 +140,7 @@ impl Share {
             Share::Start(inner) => {
                 let mut inner = inner.clone();
                 inner.advance(9);
-                return decode_varint(&mut inner).map_err(|_| ShareError::InvalidEncoding);
+                Ok(inner.get_u32() as u64)
             }
         }
     }
@@ -157,31 +168,35 @@ impl Share {
     /// Returns the offset *into the data portion* of this share at which
     /// the first tx begins. So, for example, if this share is the start of a sequence,
     /// the returned offset will be 0.
-    fn offset_of_first_tx_unchecked(&self) -> usize {
-        let offset = self.get_data_offset() - 2;
-        decode_varint(&mut std::io::Cursor::new(&self.raw_inner_ref()[offset..]))
-            .expect("reserved bytes must be valid varint") as usize
-            - self.get_data_offset()
+    fn offset_of_first_tx(&self) -> Option<usize> {
+        // FIXME: account for continuation vs. start shares
+        match self {
+            Share::Continuation(_) => {
+                let reserved_bytes_offset = NAMESPACE_ID_LEN + INFO_BYTE_LEN;
+                let mut raw = self.raw_inner().clone();
+                raw.advance(reserved_bytes_offset);
+                let idx_of_next_start = raw.get_u32() as usize;
+                if idx_of_next_start == 0 {
+                    None
+                } else {
+                    Some(idx_of_next_start - self.get_data_offset())
+                }
+            }
+            // Start shares always have a sequence begining at the first byte
+            Share::Start(_) => Some(0),
+        }
     }
 
     fn get_data_offset(&self) -> usize {
         // All shares are prefixed with metadata including the namespace (8 bytes), and info byte (1 byte)
-        let mut offset = 8 + 1;
-        // Compact shares (shares in reserved namespaces) are prefixed with 2 reserved bytes
+        let mut offset = NAMESPACE_ID_LEN + INFO_BYTE_LEN;
+        // Start shares are also prefixed with a sequence length
+        if let Self::Start(_) = self {
+            offset += SEQUENCE_LENGTH_BYTES;
+        }
         if self.namespace().is_reserved() {
-            offset += 2;
-            // Start shares in compact namespaces are also prefixed with a sequence length, which
-            // is zero padded to fill four bytes
-            if let Self::Start(_) = self {
-                offset += 4
-            }
-        } else {
-            // Start shares in sparse namespaces are prefixed with a sequence length, which
-            // is encoded as a regular varint
-            if let Self::Start(_) = self {
-                offset += skip_varint(&self.raw_inner_ref()[offset..])
-                    .expect("Share must be validly encoded")
-            }
+            // Compact shares (shares in reserved namespaces) are prefixed with 4 reserved bytes
+            offset += RESERVED_BYTES_LEN;
         }
         offset
     }
@@ -206,22 +221,27 @@ impl Share {
     }
 
     pub fn is_valid_tx_start(&self, idx: usize) -> bool {
-        if self.namespace() != TRANSACTIONS_NAMESPACE {
+        if self.namespace() != PFB_NAMESPACE {
             return false;
         }
-        let mut next_legal_start_offset = self.offset_of_first_tx_unchecked();
-        let mut remaining_data = self.data();
-        loop {
-            if next_legal_start_offset == idx {
-                return true;
-            }
-            if let Ok((tx_len, len_of_len)) = read_varint(&mut remaining_data) {
-                next_legal_start_offset += tx_len as usize + len_of_len;
-                remaining_data.advance(tx_len as usize);
-            } else {
-                return false;
+        // Check if this share contains the start of any txs
+        if let Some(mut next_legal_start_offset) = self.offset_of_first_tx() {
+            let mut remaining_data = self.data();
+            // If so, iterate over the txs in this share and check if the given idx is the start of one of them
+            loop {
+                if next_legal_start_offset == idx {
+                    return true;
+                }
+                if let Ok((tx_len, len_of_len)) = read_varint(&mut remaining_data) {
+                    next_legal_start_offset += tx_len as usize + len_of_len;
+                    remaining_data.advance(tx_len as usize);
+                } else {
+                    return false;
+                }
             }
         }
+        // Otherwise, the start index is invalid
+        false
     }
 }
 
@@ -253,7 +273,7 @@ impl NamespaceGroup {
         }
         let mut output: Bytes = decoded.into();
         if output.len() % SHARE_SIZE != 0 {
-            println!(
+            error!(
                 "Wrong length: Expected a multiple of 512, got: {}",
                 output.len()
             );

@@ -15,18 +15,6 @@ circumstances.
 
 ## Getting Started
 
-### Compile Jupiter and its Protobuf Dependencies
-
-1. Clone this repository. `cd jupiter`
-1. Clone the celestia-app, celestia-core, and cosmos-sdk repositories (`git clone --depth 100 {repo_name}`)
-1. Install the `buf` Protobuf management tool (`brew install bufbuild/buf/buf`)
-1. Install the `prost` plugin for the Protobuf compiler (which generates Rust code from .proto files): `cargo install protoc-gen-prost`
-1. Build the Celestia-app protobuf definitions: `cd celestia-app`, `cp ../example.buf.gen.prost.yaml buf.gen.prost.yaml`,
-   and `buf generate --template buf.gen.prost.yaml`
-1. Follow the same steps to generate protobufs in the `cosmos-sdk/proto` and `celestia-core` repos.
-
-The repository should now compile with `cargo build`!
-
 ### Set up Celestia
 
 Set up a Celestia light node running on the Arabica testnet, and patch it to add the `shares` endpoint required by Jupiter.
@@ -37,7 +25,7 @@ Set up a Celestia light node running on the Arabica testnet, and patch it to add
 1. Build and install the celestia binary: `make build && make go-install`
 1. Build celestia's key management tool `make cel-key`
 1. Initialize the node: `celestia light init --p2p.network arabica`
-1. Start the node: `./celestia light start --core.ip https://limani.celestia-devops.dev --p2p.network arabica --gateway --rpc.port 11111`
+1. Start the node with rpc on port 11111: `./celestia light start --core.ip https://limani.celestia-devops.dev --p2p.network arabica --gateway --rpc.port 11111`
 1. Obtain a JWT for RPC access: `./celestia light auth admin --p2p.network arabica`
 1. Copy the JWT and and save it in main.rs as `const NODE_AUTH_TOKEN`
 

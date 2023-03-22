@@ -12,13 +12,11 @@ pub mod address;
 mod proofs;
 
 use crate::{
-    da_service::{
-        FilteredCelestiaBlock, ValidationError, ROLLUP_NAMESPACE, TRANSACTIONS_NAMESPACE,
-    },
-    payment::MsgPayForData,
+    da_service::{FilteredCelestiaBlock, ValidationError, PFB_NAMESPACE, ROLLUP_NAMESPACE},
+    pfb::{BlobTx, MsgPayForBlobs},
     share_commit::recreate_commitment,
     shares::{read_varint, BlobIterator, NamespaceGroup, Share},
-    BlobWithSender, CelestiaHeader, MalleatedTx, Tx,
+    BlobWithSender, CelestiaHeader, DataAvailabilityHeader,
 };
 use hex_literal::hex;
 use proofs::*;
@@ -125,7 +123,7 @@ impl da::DaLayerTrait for CelestiaApp {
                 .expect("blob must be valid");
             println!("Successfully recreated commitment");
             let sender = filtered_block
-                .relevant_etxs
+                .relevant_pfbs
                 .get(&commitment[..])
                 .expect("blob must be relevant")
                 .0
@@ -175,30 +173,12 @@ impl da::DaLayerTrait for CelestiaApp {
         tx_proofs: Self::InclusionMultiProof,
         row_proofs: Self::CompletenessProof,
     ) -> Result<(), Self::Error> {
-        // Check the completeness of the provided blob txs
+        // Validate that the provided DAH is well-formed
         blockheader.validate_dah()?;
-        let mut relevant_row_proofs = row_proofs.into_iter();
-        let mut tx_iter = txs.iter();
-        // Verify namespace completeness
-        let square_size = blockheader.dah.row_roots.len();
 
-        // Check the validity and completeness of the rollup share proofs
-        let mut rollup_shares_u8: Vec<Vec<u8>> = Vec::new();
-        for row_root in blockheader.dah.row_roots.iter() {
-            if row_root.contains(ROLLUP_NAMESPACE) {
-                let row_proof = relevant_row_proofs
-                    .next()
-                    .expect("All proofs must be present");
-                row_proof
-                    .proof
-                    .verify_complete_namespace(row_root, &row_proof.leaves, ROLLUP_NAMESPACE)
-                    .expect("Proofs must be valid");
-
-                for leaf in row_proof.leaves {
-                    rollup_shares_u8.push(leaf)
-                }
-            }
-        }
+        // Check the validity and completeness of the rollup row proofs, against the DAH.
+        // Extract the data from the row proofs and build a namespace_group from it
+        let rollup_shares_u8 = Self::verify_row_proofs(row_proofs, &blockheader.dah)?;
         if rollup_shares_u8.is_empty() {
             if txs.is_empty() {
                 return Ok(());
@@ -209,6 +189,8 @@ impl da::DaLayerTrait for CelestiaApp {
 
         // Check the e-tx proofs...
         // TODO(@preston-evans98): Remove this logic if Celestia adds blob.sender metadata directly into blob
+        let mut tx_iter = txs.iter();
+        let square_size = blockheader.dah.row_roots.len();
         for (blob, tx_proof) in namespace.blobs().zip(tx_proofs.into_iter()) {
             // Force the row number to be monotonically increasing
             let start_offset = tx_proof.proof[0].start_offset;
@@ -225,8 +207,8 @@ impl da::DaLayerTrait for CelestiaApp {
                 let root = &blockheader.dah.row_roots[row_num];
                 sub_proof
                     .proof
-                    .verify_range(root, &sub_proof.shares, TRANSACTIONS_NAMESPACE)
-                    .map_err(|_| ValidationError::InvalidEtxProof)?;
+                    .verify_range(root, &sub_proof.shares, PFB_NAMESPACE)
+                    .map_err(|_| ValidationError::InvalidEtxProof("invalid sub proof"))?;
                 tx_shares.extend(
                     sub_proof
                         .shares
@@ -237,8 +219,10 @@ impl da::DaLayerTrait for CelestiaApp {
 
             // Next, ensure that the start_index is valid
             if !tx_shares[0].is_valid_tx_start(start_offset) {
-                return Err(ValidationError::InvalidEtxProof);
+                return Err(ValidationError::InvalidEtxProof("invalid start index"));
             }
+
+            // Collect all of the shares data into a single array
             let trailing_shares = tx_shares[1..]
                 .iter()
                 .map(|share| share.data_ref().iter())
@@ -249,45 +233,80 @@ impl da::DaLayerTrait for CelestiaApp {
                 .map(|x| *x)
                 .collect();
 
+            // Deserialize the pfb transaction
             let (len, len_of_len) = {
                 let cursor = std::io::Cursor::new(&tx_data);
                 read_varint(cursor).expect("tx must be length prefixed")
             };
             let cursor = std::io::Cursor::new(&tx_data[len_of_len..len as usize + len_of_len]);
 
-            let malleated =
-                MalleatedTx::decode(cursor).map_err(|_| ValidationError::InvalidEtxProof)?;
-            if malleated.original_tx_hash.len() != 32 {
-                return Err(ValidationError::InvalidEtxProof);
+            let blob_tx = BlobTx::decode(cursor)
+                .map_err(|_| ValidationError::InvalidEtxProof("malformed blob tx"))?;
+            let messages = blob_tx
+                .tx
+                .ok_or(ValidationError::InvalidEtxProof("No tx body in blob tx"))?
+                .body
+                .ok_or(ValidationError::InvalidEtxProof("No body in cosmos tx"))?
+                .messages;
+            if messages.len() != 1 {
+                return Err(ValidationError::InvalidEtxProof(
+                    "Expected 1 message in cosmos tx",
+                ));
             }
-            let sdk_tx = Tx::decode(malleated.tx).map_err(|_| ValidationError::InvalidEtxProof)?;
-            let body = sdk_tx.body.ok_or(ValidationError::InvalidEtxProof)?;
-            for msg in body.messages {
-                if msg.type_url == "/payment.MsgPayForData" {
-                    let pfd = MsgPayForData::decode(std::io::Cursor::new(msg.value))
-                        .map_err(|_| ValidationError::InvalidEtxProof)?;
-                    let tx = tx_iter.next().ok_or(ValidationError::MissingTx)?;
-                    if tx.sender.as_ref() != pfd.signer.as_bytes() {
-                        return Err(ValidationError::InvalidSigner);
-                    }
+            let pfb = <MsgPayForBlobs as prost::Message>::decode(&mut &messages[0].value[..])
+                .map_err(|_| ValidationError::InvalidEtxProof("malformed pfb"))?;
 
-                    let blob_ref = blob.clone();
-                    let blob_data: Bytes = blob.clone().data().collect();
-                    let tx_data: Bytes = tx.data().collect();
-                    assert_eq!(blob_data, tx_data);
-
-                    // Link blob commitment to e-tx commitment
-                    let expected_commitment = recreate_commitment(square_size, blob_ref)
-                        .map_err(|_| ValidationError::InvalidEtxProof)?;
-
-                    assert_eq!(&pfd.message_share_commitment[..], &expected_commitment);
+            // Verify the sender and data of each blob which was sent into this namespace
+            for (blob_idx, nid) in pfb.namespace_ids.iter().enumerate() {
+                if nid != &ROLLUP_NAMESPACE.0[..] {
+                    continue;
                 }
+                let tx = tx_iter.next().ok_or(ValidationError::MissingTx)?;
+                if tx.sender.as_ref() != pfb.signer.as_bytes() {
+                    return Err(ValidationError::InvalidSigner);
+                }
+
+                let blob_ref = blob.clone();
+                let blob_data: Bytes = blob.clone().data().collect();
+                let tx_data: Bytes = tx.data().collect();
+                assert_eq!(blob_data, tx_data);
+
+                // Link blob commitment to e-tx commitment
+                let expected_commitment =
+                    recreate_commitment(square_size, blob_ref).map_err(|_| {
+                        ValidationError::InvalidEtxProof("failed to recreate commitment")
+                    })?;
+
+                assert_eq!(&pfb.share_commitments[blob_idx][..], &expected_commitment);
             }
         }
 
-        // Check the correctness of the sender field
-
-        // todo!()
         Ok(())
+    }
+}
+
+impl CelestiaApp {
+    pub fn verify_row_proofs(
+        row_proofs: Vec<RelevantRowProof>,
+        dah: &DataAvailabilityHeader,
+    ) -> Result<Vec<Vec<u8>>, ValidationError> {
+        let mut row_proofs = row_proofs.into_iter();
+        // Check the validity and completeness of the rollup share proofs
+        let mut rollup_shares_u8: Vec<Vec<u8>> = Vec::new();
+        for row_root in dah.row_roots.iter() {
+            // TODO: short circuit this loop at the first row after the rollup namespace
+            if row_root.contains(ROLLUP_NAMESPACE) {
+                let row_proof = row_proofs.next().ok_or(ValidationError::InvalidRowProof)?;
+                row_proof
+                    .proof
+                    .verify_complete_namespace(row_root, &row_proof.leaves, ROLLUP_NAMESPACE)
+                    .expect("Proofs must be valid");
+
+                for leaf in row_proof.leaves {
+                    rollup_shares_u8.push(leaf)
+                }
+            }
+        }
+        Ok(rollup_shares_u8)
     }
 }
