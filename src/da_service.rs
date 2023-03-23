@@ -24,7 +24,7 @@ use crate::{
     shares::{NamespaceGroup, Share},
     types::{ExtendedDataSquare, RpcNamespacedSharesResponse},
     utils::BoxError,
-    CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, TxPosition,
+    BlobWithSender, CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, TxPosition,
 };
 
 #[derive(Debug, Clone)]
@@ -73,7 +73,32 @@ impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
     }
 }
 
-impl SlotData for FilteredCelestiaBlock {}
+impl SlotData for FilteredCelestiaBlock {
+    type BatchData = BlobWithSender;
+    fn hash(&self) -> [u8; 32] {
+        match self.header.header.hash() {
+            tendermint::Hash::Sha256(h) => h,
+            tendermint::Hash::None => unreachable!("tendermint::Hash::None should not be possible"),
+        }
+    }
+
+    fn extra_data_for_storage(&self) -> Vec<u8> {
+        serde_cbor::ser::to_vec(&self.header).expect("serializing to vec should not fail")
+    }
+
+    fn reconstruct_from_storage(extra_data: &[u8], batches: Vec<Self::BatchData>) -> Self {
+        let header =
+            serde_cbor::de::from_slice(extra_data).expect("deserializing from vec should not fail");
+        let blobs: Vec<Share> = batches.into_iter().flat_map(|b| b.blob.0).collect();
+        Self {
+            header,
+            rollup_data: NamespaceGroup::Sparse(blobs),
+            relevant_pfbs: HashMap::new(),
+            rollup_rows: Vec::new(),
+            pfb_rows: Vec::new(),
+        }
+    }
+}
 impl FilteredCelestiaBlock {
     pub fn square_size(&self) -> usize {
         self.header.square_size()
@@ -226,7 +251,6 @@ impl DaService for CelestiaService {
                     if nid == &ROLLUP_NAMESPACE.0[..] {
                         // TODO: Retool this map to avoid cloning txs
                         pfd_map.insert(tx.0.share_commitments[idx].clone(), tx.clone());
-                        println!("Found PFD for {:?}", &tx.0.share_commitments[idx]);
                     }
                 }
             }

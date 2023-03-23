@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use prost::Message;
 use serde::Deserialize;
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash},
+    db::SlotStore,
     serial::{Decode, DecodeBorrowed, DeserializationError, Encode},
     Bytes,
 };
@@ -23,8 +22,8 @@ use proofs::*;
 
 use self::address::CelestiaAddress;
 
-pub struct CelestiaApp {
-    pub db: HashMap<TmHash, FilteredCelestiaBlock>,
+pub struct CelestiaApp<DB> {
+    pub db: DB,
 }
 
 impl BlobTransactionTrait<CelestiaAddress> for BlobWithSender {
@@ -44,6 +43,15 @@ pub struct TmHash(pub tendermint::Hash);
 impl AsRef<[u8]> for TmHash {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl TmHash {
+    pub fn inner(&self) -> &[u8; 32] {
+        match self.0 {
+            tendermint::Hash::Sha256(ref h) => h,
+            tendermint::Hash::None => unreachable!("tendermint::Hash::None should not be possible"),
+        }
     }
 }
 
@@ -90,7 +98,7 @@ impl Encode for TmHash {
     }
 }
 
-impl da::DaLayerTrait for CelestiaApp {
+impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaApp<DB> {
     type Blockhash = TmHash;
 
     type Address = CelestiaAddress;
@@ -114,14 +122,13 @@ impl da::DaLayerTrait for CelestiaApp {
     fn get_relevant_txs(&self, blockhash: &Self::Blockhash) -> Vec<Self::BlobTransaction> {
         let filtered_block = self
             .db
-            .get(blockhash)
+            .get(blockhash.inner())
             .expect("Must only call get txs on extant blocks");
 
         let mut output = Vec::new();
         for blob in filtered_block.rollup_data.blobs() {
             let commitment = recreate_commitment(filtered_block.square_size(), blob.clone())
                 .expect("blob must be valid");
-            println!("Successfully recreated commitment");
             let sender = filtered_block
                 .relevant_pfbs
                 .get(&commitment[..])
@@ -149,12 +156,12 @@ impl da::DaLayerTrait for CelestiaApp {
     ) {
         let filtered_block = self
             .db
-            .get(blockhash)
+            .get(blockhash.inner())
             .expect("Must only call get txs on extant blocks");
 
         let relevant_txs = self.get_relevant_txs(blockhash);
-        let etx_proofs = CorrectnessProof::for_block(filtered_block, &relevant_txs);
-        let rollup_row_proofs = CompletenessProof::from_filtered_block(filtered_block);
+        let etx_proofs = CorrectnessProof::for_block(&filtered_block, &relevant_txs);
+        let rollup_row_proofs = CompletenessProof::from_filtered_block(&filtered_block);
 
         (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
     }
@@ -285,7 +292,7 @@ impl da::DaLayerTrait for CelestiaApp {
     }
 }
 
-impl CelestiaApp {
+impl<DB> CelestiaApp<DB> {
     pub fn verify_row_proofs(
         row_proofs: Vec<RelevantRowProof>,
         dah: &DataAvailabilityHeader,

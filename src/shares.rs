@@ -419,6 +419,22 @@ impl Iterator for BlobIterator {
     }
 }
 
+impl std::io::Read for BlobIterator {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut written = 0;
+        for byte in buf.iter_mut() {
+            *byte = match self.next() {
+                Some(byte) => {
+                    written += 1;
+                    byte
+                }
+                None => return Ok(written),
+            };
+        }
+        Ok(written)
+    }
+}
+
 impl Buf for BlobIterator {
     fn remaining(&self) -> usize {
         self.sequence_len - self.consumed
