@@ -27,7 +27,7 @@ checksum = "86ea188f25f0255d8f92797797c97ebf5631fa88178beb1a46fdf5622c9a00e4"
 dependencies = [
  "proc-macro2 1.0.53",
  "quote 1.0.26",
- "syn 2.0.5",
+ "syn 2.0.8",
 ]
 
 [[package]]
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "first-read-last-write-cache"
 version = "0.1.0"
-source = "git+https://github.com/Sovereign-Labs/sovereign-sdk#bd5baf871dac30c5503c5716365f9b01c73a4de5"
+source = "git+https://github.com/Sovereign-Labs/sovereign.git#600b62fadb42ef145737286614b9d90d0b4a1b48"
 dependencies = [
  "thiserror",
 ]
@@ -1000,9 +1000,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openssl"
-version = "0.10.47"
+version = "0.10.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b277f87dacc05a6b709965d1cbafac4649d6ce9f3ce9ceb88508b5666dfec9"
+checksum = "518915b97df115dd36109bfa429a48b8f737bd05508cf9588977b599648926d2"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -1032,9 +1032,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.82"
+version = "0.9.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95792af3c4e0153c3914df2261bedd30a98476f94dc892b67dfe1d89d433a04"
+checksum = "666416d899cf077260dac8698d60a60b435a46d57e82acb1be3d0dad87284e5b"
 dependencies = [
  "autocfg",
  "cc",
@@ -1577,7 +1577,7 @@ checksum = "e801c1712f48475582b7696ac71e0ca34ebb30e09338425384269d9717c62cad"
 dependencies = [
  "proc-macro2 1.0.53",
  "quote 1.0.26",
- "syn 2.0.5",
+ "syn 2.0.8",
 ]
 
 [[package]]
@@ -1599,7 +1599,7 @@ checksum = "bcec881020c684085e55a25f7fd888954d56609ef363479dc5a1305eb0d40cab"
 dependencies = [
  "proc-macro2 1.0.53",
  "quote 1.0.26",
- "syn 2.0.5",
+ "syn 2.0.8",
 ]
 
 [[package]]
@@ -1700,7 +1700,7 @@ dependencies = [
 [[package]]
 name = "sovereign-sdk"
 version = "0.1.0"
-source = "git+https://github.com/Sovereign-Labs/sovereign-sdk#bd5baf871dac30c5503c5716365f9b01c73a4de5"
+source = "git+https://github.com/Sovereign-Labs/sovereign.git#600b62fadb42ef145737286614b9d90d0b4a1b48"
 dependencies = [
  "anyhow",
  "borsh",
@@ -1756,9 +1756,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.5"
+version = "2.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89c2d1c76a26822187a1fbb5964e3fff108bc208f02e820ab9dac1234f6b388a"
+checksum = "bcc02725fd69ab9f26eab07fad303e2497fad6fb9eba4f96c4d1687bdf704ad9"
 dependencies = [
  "proc-macro2 1.0.53",
  "quote 1.0.26",
@@ -1853,7 +1853,7 @@ checksum = "f9456a42c5b0d803c8cd86e73dd7cc9edd429499f37a3550d286d5e86720569f"
 dependencies = [
  "proc-macro2 1.0.53",
  "quote 1.0.26",
- "syn 2.0.5",
+ "syn 2.0.8",
 ]
 
 [[package]]

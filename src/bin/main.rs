@@ -1,10 +1,14 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use jsonrpsee::http_client::HeaderMap;
-use jupiter::{da_app::CelestiaApp, da_service::CelestiaService};
+use jupiter::{
+    da_app::CelestiaApp,
+    da_service::{CelestiaService, FilteredCelestiaBlock},
+};
 use sovereign_sdk::{
     core::traits::CanonicalHash,
     da::{BlobTransactionTrait, DaLayerTrait},
+    db::SlotStore,
     services::da::DaService,
 };
 use tracing::Level;
@@ -13,6 +17,22 @@ use tracing::Level;
 
 // I sent the following test blob in block 275345. on arabica-6 Namespace: b'sov-test'
 // b'{"key": "testkey", "value": "testvalue"}'
+
+pub struct MockDb {
+    pub db: Mutex<HashMap<[u8; 32], FilteredCelestiaBlock>>,
+}
+
+impl SlotStore for MockDb {
+    type Slot = FilteredCelestiaBlock;
+
+    fn get(&self, hash: &[u8; 32]) -> Option<Self::Slot> {
+        self.db.lock().unwrap().get(hash).map(Clone::clone)
+    }
+
+    fn insert(&self, hash: [u8; 32], slot_data: Self::Slot) {
+        self.db.lock().unwrap().insert(hash, slot_data);
+    }
+}
 
 const NODE_AUTH_TOKEN: &'static str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJBbGxvdyI6WyJwdWJsaWMiLCJyZWFkIiwid3JpdGUiLCJhZG1pbiJdfQ.nHzh7kWvC3puCYgcMJRuNlMudwf6xGagETNdQyRQQ_s";
 #[tokio::main]
@@ -46,10 +66,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let hash = block.header.hash();
         ordered_hashes.push(hash.clone());
         ordered_headers.push(block.header.clone());
-        db.insert(hash, block);
+        db.insert(hash.inner().clone(), block);
     }
 
-    let celestia = CelestiaApp { db };
+    let celestia = CelestiaApp {
+        db: MockDb { db: Mutex::new(db) },
+    };
     for (hash, header) in ordered_hashes.into_iter().zip(ordered_headers) {
         let (txs, inclusion_proof, completeness_proof) =
             celestia.get_relevant_txs_with_proof(&hash);
