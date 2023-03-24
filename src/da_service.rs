@@ -204,7 +204,7 @@ impl DaService for CelestiaService {
 
     type Error = BoxError;
 
-    fn get_finalized_at(&self, height: usize) -> Self::Future<Self::FilteredBlock> {
+    fn get_finalized_at(&self, height: u64) -> Self::Future<Self::FilteredBlock> {
         let client = self.client.clone();
         Box::pin(async move {
             let _span = span!(Level::TRACE, "fetching finalized block", height = height);
@@ -270,7 +270,7 @@ impl DaService for CelestiaService {
         })
     }
 
-    fn get_block_at(&self, height: usize) -> Self::Future<Self::FilteredBlock> {
+    fn get_block_at(&self, height: u64) -> Self::Future<Self::FilteredBlock> {
         self.get_finalized_at(height)
     }
 }
