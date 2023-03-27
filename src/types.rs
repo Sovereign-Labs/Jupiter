@@ -17,7 +17,7 @@ pub struct JsonNamespaceProof {
     #[serde(rename = "End")]
     end: usize,
     #[serde(rename = "Nodes")]
-    nodes: Vec<StringWrapper>,
+    nodes: Option<Vec<StringWrapper>>,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
@@ -71,6 +71,7 @@ impl Into<NamespaceProof<NamespacedSha2Hasher>> for JsonNamespaceProof {
             proof: Proof {
                 siblings: self
                     .nodes
+                    .unwrap_or_default()
                     .into_iter()
                     .map(|v| ns_hash_from_b64(&v.inner))
                     .collect(),
