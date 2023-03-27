@@ -7,14 +7,15 @@ use serde::{Deserialize, Serialize};
 use sovereign_sdk::core::traits::{
     AddressTrait as Address, BlockheaderTrait as Blockheader, CanonicalHash,
 };
+use tracing::debug;
 
 const NAMESPACED_HASH_LEN: usize = 48;
 
 use crate::{
     da_app::{address::CelestiaAddress, TmHash},
     da_service::PFB_NAMESPACE,
-    pfb::{BlobTx, MsgPayForBlobs},
-    shares::{skip_varint, Blob, BlobRefIterator, NamespaceGroup},
+    pfb::{BlobTx, MsgPayForBlobs, Tx},
+    shares::{read_varint, Blob, BlobRefIterator, NamespaceGroup},
     utils::BoxError,
 };
 
@@ -182,21 +183,32 @@ pub struct TxPosition {
     pub start_offset: usize,
 }
 
-fn next_pfb(mut data: &mut BlobRefIterator) -> Result<(MsgPayForBlobs, TxPosition), BoxError> {
-    let (start_idx, start_offset) = data.current_position();
-    let _len = skip_varint(&mut data).expect("Varint must be valid");
-    let blob_tx = BlobTx::decode(&mut data)?;
-    let messages = blob_tx
-        .tx
-        .ok_or(anyhow::format_err!("No tx body in blob tx"))?
+pub(crate) fn pfb_from_iter(data: impl Buf, pfb_len: usize) -> Result<MsgPayForBlobs, BoxError> {
+    debug!("Decoding blob tx");
+    let mut blob_tx = BlobTx::decode(data.take(pfb_len))?;
+    debug!("Decoding cosmos sdk tx");
+    let cosmos_tx = Tx::decode(&mut blob_tx.tx)?;
+    let messages = cosmos_tx
         .body
         .ok_or(anyhow::format_err!("No body in cosmos tx"))?
         .messages;
     if messages.len() != 1 {
         return Err(anyhow::format_err!("Expected 1 message in cosmos tx"));
     }
-    let pfb = MsgPayForBlobs::decode(&mut &messages[0].value[..])?;
+    debug!("Decoding PFB from blob tx value");
+    Ok(MsgPayForBlobs::decode(&mut &messages[0].value[..])?)
+}
+
+fn next_pfb(mut data: &mut BlobRefIterator) -> Result<(MsgPayForBlobs, TxPosition), BoxError> {
+    let (start_idx, start_offset) = data.current_position();
+    let (len, len_of_len) = read_varint(&mut data).expect("Varint must be valid");
+    debug!(
+        "Decoding wrapped PFB of length {}. Stripped {} bytes of prefix metadata",
+        len, len_of_len
+    );
+
     let current_share_idx = data.current_position().0;
+    let pfb = pfb_from_iter(&mut data, len as usize)?;
 
     Ok((
         pfb,
