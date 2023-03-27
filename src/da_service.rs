@@ -243,6 +243,7 @@ impl DaService for CelestiaService {
             )
             .await?;
 
+            info!("Decoding pfb protofbufs...");
             // Parse out the pfds and store them for later retrieval
             let pfds = parse_pfb_namespace(tx_data)?;
             let mut pfd_map = HashMap::new();

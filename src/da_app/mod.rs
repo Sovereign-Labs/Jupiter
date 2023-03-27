@@ -1,4 +1,3 @@
-use prost::Message;
 use serde::Deserialize;
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash},
@@ -12,7 +11,7 @@ mod proofs;
 
 use crate::{
     da_service::{FilteredCelestiaBlock, ValidationError, PFB_NAMESPACE, ROLLUP_NAMESPACE},
-    pfb::{BlobTx, MsgPayForBlobs},
+    pfb_from_iter,
     share_commit::recreate_commitment,
     shares::{read_varint, BlobIterator, NamespaceGroup, Share},
     BlobWithSender, CelestiaHeader, DataAvailabilityHeader,
@@ -245,23 +244,10 @@ impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaA
                 let cursor = std::io::Cursor::new(&tx_data);
                 read_varint(cursor).expect("tx must be length prefixed")
             };
-            let cursor = std::io::Cursor::new(&tx_data[len_of_len..len as usize + len_of_len]);
+            let mut cursor = std::io::Cursor::new(&tx_data[len_of_len..len as usize + len_of_len]);
 
-            let blob_tx = BlobTx::decode(cursor)
-                .map_err(|_| ValidationError::InvalidEtxProof("malformed blob tx"))?;
-            let messages = blob_tx
-                .tx
-                .ok_or(ValidationError::InvalidEtxProof("No tx body in blob tx"))?
-                .body
-                .ok_or(ValidationError::InvalidEtxProof("No body in cosmos tx"))?
-                .messages;
-            if messages.len() != 1 {
-                return Err(ValidationError::InvalidEtxProof(
-                    "Expected 1 message in cosmos tx",
-                ));
-            }
-            let pfb = <MsgPayForBlobs as prost::Message>::decode(&mut &messages[0].value[..])
-                .map_err(|_| ValidationError::InvalidEtxProof("malformed pfb"))?;
+            let pfb = pfb_from_iter(&mut cursor, len as usize)
+                .map_err(|_| ValidationError::InvalidEtxProof("invalid pfb"))?;
 
             // Verify the sender and data of each blob which was sent into this namespace
             for (blob_idx, nid) in pfb.namespace_ids.iter().enumerate() {

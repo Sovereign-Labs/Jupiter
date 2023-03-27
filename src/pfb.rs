@@ -3,8 +3,8 @@
 /// using the relevant MsgPayForBlobs that is signed over in the encoded sdk.Tx.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlobTx {
-    #[prost(message, optional, tag = "1")]
-    pub tx: ::core::option::Option<Tx>,
+    #[prost(bytes = "bytes", tag = "1")]
+    pub tx: ::prost::bytes::Bytes,
 }
 
 /// Tx is the standard type used for broadcasting transactions.
