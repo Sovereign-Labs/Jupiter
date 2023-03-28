@@ -130,7 +130,7 @@ impl AsRef<[u8]> for Sha2Hash {
     }
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Eq)]
 pub struct H160(#[serde(deserialize_with = "hex::deserialize")] pub [u8; 20]);
 
 impl AsRef<[u8]> for H160 {
@@ -139,10 +139,9 @@ impl AsRef<[u8]> for H160 {
     }
 }
 
-pub struct NotExactlyTwentyBytes;
 
 impl<'a> TryFrom<&'a [u8]> for H160 {
-    type Error = NotExactlyTwentyBytes;
+    type Error = anyhow::Error;
 
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
         if value.len() == 20 {
@@ -150,7 +149,7 @@ impl<'a> TryFrom<&'a [u8]> for H160 {
             addr.copy_from_slice(value);
             return Ok(Self(addr));
         }
-        Err(NotExactlyTwentyBytes)
+        anyhow::bail!("Adress is not exactly 20 bytes");
     }
 }
 impl Address for H160 {}
