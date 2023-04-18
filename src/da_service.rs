@@ -75,13 +75,6 @@ impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
 
 impl SlotData for FilteredCelestiaBlock {
     type BatchData = BlobWithSender;
-    fn hash(&self) -> [u8; 32] {
-        match self.header.header.hash() {
-            tendermint::Hash::Sha256(h) => h,
-            tendermint::Hash::None => unreachable!("tendermint::Hash::None should not be possible"),
-        }
-    }
-
     fn extra_data_for_storage(&self) -> Vec<u8> {
         serde_cbor::ser::to_vec(&self.header).expect("serializing to vec should not fail")
     }
@@ -96,6 +89,13 @@ impl SlotData for FilteredCelestiaBlock {
             relevant_pfbs: HashMap::new(),
             rollup_rows: Vec::new(),
             pfb_rows: Vec::new(),
+        }
+    }
+
+    fn hash(&self) -> [u8; 32] {
+        match self.header.header.hash() {
+            tendermint::Hash::Sha256(h) => h,
+            tendermint::Hash::None => unreachable!("tendermint::Hash::None should not be possible"),
         }
     }
 }
@@ -209,7 +209,7 @@ impl DaService for CelestiaService {
         Box::pin(async move {
             let _span = span!(Level::TRACE, "fetching finalized block", height = height);
             // Fetch the header and relevant shares via RPC
-            info!("Fetching header...");
+            info!("Fetching header at height={}...", height);
             let header = client
                 .request::<serde_json::Value, _>("header.GetByHeight", vec![height])
                 .await?;
@@ -224,7 +224,7 @@ impl DaService for CelestiaService {
                     "share.GetEDS",
                     vec![header
                         .get("dah")
-                        .ok_or(BoxError::msg("missing dah in block header"))?],
+                        .ok_or(BoxError::msg("missing 'dah' in block header"))?],
                 )
                 .await?;
 
