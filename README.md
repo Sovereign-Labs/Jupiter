@@ -34,8 +34,10 @@ At a bare minimum, you should ensure that the verifier rejects...
 1. If any blob is duplicated
 1. If any extra blobs are added
 
-For compatibility, we also recommend (but don't require) that any logic in the `DaVerifier` be able to build with `no_std`.
-This maximizes your odds of being compatible with
+We also recommend (but don't require) that any logic in the `DaVerifier` be able to build with `no_std`.
+This maximizes your odds of being compatible with new zk proof systems as they become available. However,
+it's worth noting that some Rust-compatible SNARKs (including Risc0) support limited versions of `std`. If you only care
+about compatibility with these proof systems, then `no_std` isn't a requirement.
 
 **Jupiter's DA Verifier**
 
