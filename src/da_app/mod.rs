@@ -98,7 +98,7 @@ impl Encode for TmHash {
 }
 
 impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaApp<DB> {
-    type Slothash = TmHash;
+    type SlotHash = TmHash;
 
     type Address = CelestiaAddress;
 
@@ -114,11 +114,11 @@ impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaA
 
     const ADDRESS_LENGTH: usize = 20;
 
-    const RELATIVE_GENESIS: Self::Slothash = TmHash(tendermint::Hash::Sha256(hex!(
+    const RELATIVE_GENESIS: Self::SlotHash = TmHash(tendermint::Hash::Sha256(hex!(
         "7D99C8487B0914AA6851549CD59440FAFC20697B9029DF7AD07A681A50ACA747"
     )));
 
-    fn get_relevant_txs(&self, blockhash: &Self::Slothash) -> Vec<Self::BlobTransaction> {
+    fn get_relevant_txs(&self, blockhash: &Self::SlotHash) -> Vec<Self::BlobTransaction> {
         let filtered_block = self
             .db
             .get(blockhash.inner())
@@ -147,7 +147,7 @@ impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaA
 
     fn get_relevant_txs_with_proof(
         &self,
-        blockhash: &Self::Slothash,
+        blockhash: &Self::SlotHash,
     ) -> (
         Vec<Self::BlobTransaction>,
         Self::InclusionMultiProof,
