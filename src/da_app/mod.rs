@@ -1,22 +1,20 @@
 use serde::Deserialize;
 use sovereign_sdk::{
-    da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash},
-    db::SlotStore,
+    da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash, DaSpec},
     serial::{Decode, DecodeBorrowed, DeserializationError, Encode},
     Bytes,
 };
 
 pub mod address;
-mod proofs;
+pub mod proofs;
 
 use crate::{
-    da_service::{FilteredCelestiaBlock, ValidationError, PFB_NAMESPACE, ROLLUP_NAMESPACE},
+    da_service::{ValidationError, PFB_NAMESPACE, ROLLUP_NAMESPACE},
     pfb_from_iter,
     share_commit::recreate_commitment,
     shares::{read_varint, BlobIterator, NamespaceGroup, Share},
     BlobWithSender, CelestiaHeader, DataAvailabilityHeader,
 };
-use hex_literal::hex;
 use proofs::*;
 
 use self::address::CelestiaAddress;
@@ -97,7 +95,9 @@ impl Encode for TmHash {
     }
 }
 
-impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaApp<DB> {
+pub struct CelestiaSpec;
+
+impl DaSpec for CelestiaSpec {
     type SlotHash = TmHash;
 
     type Address = CelestiaAddress;
@@ -109,82 +109,26 @@ impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaA
     type InclusionMultiProof = Vec<EtxProof>;
 
     type CompletenessProof = Vec<RelevantRowProof>;
+}
+
+impl<DB> da::DaVerifier for CelestiaApp<DB> {
+    type Spec = CelestiaSpec;
 
     type Error = ValidationError;
 
-    const ADDRESS_LENGTH: usize = 20;
-
-    const RELATIVE_GENESIS: Self::SlotHash = TmHash(tendermint::Hash::Sha256(hex!(
-        "7D99C8487B0914AA6851549CD59440FAFC20697B9029DF7AD07A681A50ACA747"
-    )));
-
-    fn get_relevant_txs(&self, blockhash: &Self::SlotHash) -> Vec<Self::BlobTransaction> {
-        let filtered_block = self
-            .db
-            .get(blockhash.inner())
-            .expect("Must only call get txs on extant blocks");
-
-        let mut output = Vec::new();
-        for blob in filtered_block.rollup_data.blobs() {
-            let commitment = recreate_commitment(filtered_block.square_size(), blob.clone())
-                .expect("blob must be valid");
-            let sender = filtered_block
-                .relevant_pfbs
-                .get(&commitment[..])
-                .expect("blob must be relevant")
-                .0
-                .signer
-                .clone();
-
-            let blob_tx = BlobWithSender {
-                blob: blob.into(),
-                sender: CelestiaAddress(sender.as_bytes().to_vec()),
-            };
-            output.push(blob_tx)
-        }
-        output
-    }
-
-    fn get_relevant_txs_with_proof(
-        &self,
-        blockhash: &Self::SlotHash,
-    ) -> (
-        Vec<Self::BlobTransaction>,
-        Self::InclusionMultiProof,
-        Self::CompletenessProof,
-    ) {
-        let filtered_block = self
-            .db
-            .get(blockhash.inner())
-            .expect("Must only call get txs on extant blocks");
-
-        let relevant_txs = self.get_relevant_txs(blockhash);
-        let etx_proofs = CorrectnessProof::for_block(&filtered_block, &relevant_txs);
-        let rollup_row_proofs = CompletenessProof::from_filtered_block(&filtered_block);
-
-        (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
-    }
-
-    // Workflow:
-    // 1. Validate DAH
-    // 2. For row in dah, if it might contain any relevant transactions, check the "Completeness proof"
-    // For the data thus generated, deserialize into blobs. Compute the share commitments
-    // For each blob, find the relevant "inclusion_proof". Verify the inclusion of the shares, then
-    // deserialize to find the commitment and sender. Verify that the share_commitment matches the blob,
-    // and the sender matches the blob sender. Done
     fn verify_relevant_tx_list(
         &self,
-        blockheader: &Self::BlockHeader,
-        txs: &[Self::BlobTransaction],
-        tx_proofs: Self::InclusionMultiProof,
-        row_proofs: Self::CompletenessProof,
+        block_header: &<Self::Spec as DaSpec>::BlockHeader,
+        txs: &[<Self::Spec as DaSpec>::BlobTransaction],
+        inclusion_proof: <Self::Spec as DaSpec>::InclusionMultiProof,
+        completeness_proof: <Self::Spec as DaSpec>::CompletenessProof,
     ) -> Result<(), Self::Error> {
         // Validate that the provided DAH is well-formed
-        blockheader.validate_dah()?;
+        block_header.validate_dah()?;
 
         // Check the validity and completeness of the rollup row proofs, against the DAH.
         // Extract the data from the row proofs and build a namespace_group from it
-        let rollup_shares_u8 = Self::verify_row_proofs(row_proofs, &blockheader.dah)?;
+        let rollup_shares_u8 = Self::verify_row_proofs(completeness_proof, &block_header.dah)?;
         if rollup_shares_u8.is_empty() {
             if txs.is_empty() {
                 return Ok(());
@@ -196,8 +140,8 @@ impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaA
         // Check the e-tx proofs...
         // TODO(@preston-evans98): Remove this logic if Celestia adds blob.sender metadata directly into blob
         let mut tx_iter = txs.iter();
-        let square_size = blockheader.dah.row_roots.len();
-        for (blob, tx_proof) in namespace.blobs().zip(tx_proofs.into_iter()) {
+        let square_size = block_header.dah.row_roots.len();
+        for (blob, tx_proof) in namespace.blobs().zip(inclusion_proof.into_iter()) {
             // Force the row number to be monotonically increasing
             let start_offset = tx_proof.proof[0].start_offset;
 
@@ -210,7 +154,7 @@ impl<DB: SlotStore<Slot = FilteredCelestiaBlock>> da::DaLayerTrait for CelestiaA
             // Then, verify the sub proofs
             for sub_proof in tx_proof.proof.into_iter() {
                 let row_num = sub_proof.start_share_idx / square_size;
-                let root = &blockheader.dah.row_roots[row_num];
+                let root = &block_header.dah.row_roots[row_num];
                 sub_proof
                     .proof
                     .verify_range(root, &sub_proof.shares, PFB_NAMESPACE)

@@ -343,7 +343,7 @@ impl NamespaceGroup {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, BorshDeserialize, BorshSerialize)]
 pub struct Blob(pub Vec<Share>);
 
 impl<'a> From<BlobRef<'a>> for Blob {

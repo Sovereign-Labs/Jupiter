@@ -1,6 +1,7 @@
+use borsh::{BorshDeserialize, BorshSerialize};
 use sovereign_sdk::core::traits::AddressTrait as Address;
 
-#[derive(Debug, PartialEq, Clone, Eq)]
+#[derive(Debug, PartialEq, Clone, Eq, BorshDeserialize, BorshSerialize)]
 pub struct CelestiaAddress(pub Vec<u8>);
 
 impl AsRef<[u8]> for CelestiaAddress {

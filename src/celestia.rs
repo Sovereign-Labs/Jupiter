@@ -91,7 +91,7 @@ impl CanonicalHash for CelestiaHeader {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, BorshDeserialize, BorshSerialize)]
 pub struct BlobWithSender {
     pub blob: Blob,
     pub sender: CelestiaAddress,
