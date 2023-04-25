@@ -5,7 +5,7 @@ use nmt_rs::NamespacedHash;
 use prost::{bytes::Buf, Message};
 use serde::{Deserialize, Serialize};
 use sovereign_sdk::core::traits::{
-    AddressTrait as Address, BlockheaderTrait as Blockheader, CanonicalHash,
+    AddressTrait as Address, BlockHeaderTrait as BlockHeader, CanonicalHash,
 };
 use tracing::debug;
 
@@ -91,13 +91,13 @@ impl CanonicalHash for CelestiaHeader {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, BorshDeserialize, BorshSerialize)]
 pub struct BlobWithSender {
     pub blob: Blob,
     pub sender: CelestiaAddress,
 }
 
-impl Blockheader for CelestiaHeader {
+impl BlockHeader for CelestiaHeader {
     type Hash = TmHash;
 
     fn prev_hash(&self) -> &Self::Hash {
@@ -138,7 +138,6 @@ impl AsRef<[u8]> for H160 {
         self.0.as_ref()
     }
 }
-
 
 impl<'a> TryFrom<&'a [u8]> for H160 {
     type Error = anyhow::Error;

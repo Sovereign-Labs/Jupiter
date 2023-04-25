@@ -19,8 +19,14 @@ pub const PFB_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000
 pub const PARITY_SHARES_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("ffffffffffffffff"));
 
 use crate::{
+    da_app::{
+        address::CelestiaAddress,
+        proofs::{CompletenessProof, CorrectnessProof},
+        CelestiaSpec,
+    },
     parse_pfb_namespace,
     pfb::MsgPayForBlobs,
+    share_commit::recreate_commitment,
     shares::{NamespaceGroup, Share},
     types::{ExtendedDataSquare, RpcNamespacedSharesResponse},
     utils::BoxError,
@@ -74,24 +80,6 @@ impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
 }
 
 impl SlotData for FilteredCelestiaBlock {
-    type BatchData = BlobWithSender;
-    fn extra_data_for_storage(&self) -> Vec<u8> {
-        serde_cbor::ser::to_vec(&self.header).expect("serializing to vec should not fail")
-    }
-
-    fn reconstruct_from_storage(extra_data: &[u8], batches: Vec<Self::BatchData>) -> Self {
-        let header =
-            serde_cbor::de::from_slice(extra_data).expect("deserializing from vec should not fail");
-        let blobs: Vec<Share> = batches.into_iter().flat_map(|b| b.blob.0).collect();
-        Self {
-            header,
-            rollup_data: NamespaceGroup::Sparse(blobs),
-            relevant_pfbs: HashMap::new(),
-            rollup_rows: Vec::new(),
-            pfb_rows: Vec::new(),
-        }
-    }
-
     fn hash(&self) -> [u8; 32] {
         match self.header.header.hash() {
             tendermint::Hash::Sha256(h) => h,
@@ -198,9 +186,9 @@ pub async fn fetch_needed_shares_by_header(
 impl DaService for CelestiaService {
     type FilteredBlock = FilteredCelestiaBlock;
 
-    type Future<T> = Pin<Box<dyn Future<Output = Result<T, Self::Error>>>>;
+    type Spec = CelestiaSpec;
 
-    // type Address;
+    type Future<T> = Pin<Box<dyn Future<Output = Result<T, Self::Error>>>>;
 
     type Error = BoxError;
 
@@ -273,6 +261,46 @@ impl DaService for CelestiaService {
 
     fn get_block_at(&self, height: u64) -> Self::Future<Self::FilteredBlock> {
         self.get_finalized_at(height)
+    }
+
+    fn extract_relevant_txs(
+        &self,
+        block: Self::FilteredBlock,
+    ) -> Vec<<Self::Spec as sovereign_sdk::da::DaSpec>::BlobTransaction> {
+        let mut output = Vec::new();
+        for blob in block.rollup_data.blobs() {
+            let commitment =
+                recreate_commitment(block.square_size(), blob.clone()).expect("blob must be valid");
+            let sender = block
+                .relevant_pfbs
+                .get(&commitment[..])
+                .expect("blob must be relevant")
+                .0
+                .signer
+                .clone();
+
+            let blob_tx = BlobWithSender {
+                blob: blob.into(),
+                sender: CelestiaAddress(sender.as_bytes().to_vec()),
+            };
+            output.push(blob_tx)
+        }
+        output
+    }
+
+    fn extract_relevant_txs_with_proof(
+        &self,
+        block: Self::FilteredBlock,
+    ) -> (
+        Vec<<Self::Spec as sovereign_sdk::da::DaSpec>::BlobTransaction>,
+        <Self::Spec as sovereign_sdk::da::DaSpec>::InclusionMultiProof,
+        <Self::Spec as sovereign_sdk::da::DaSpec>::CompletenessProof,
+    ) {
+        let relevant_txs = self.extract_relevant_txs(block.clone());
+        let etx_proofs = CorrectnessProof::for_block(&block, &relevant_txs);
+        let rollup_row_proofs = CompletenessProof::from_filtered_block(&block);
+
+        (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
     }
 }
 

@@ -1,3 +1,4 @@
+use borsh::{BorshDeserialize, BorshSerialize};
 use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
 
 use crate::{
@@ -7,12 +8,12 @@ use crate::{
     BlobWithSender,
 };
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
 pub struct EtxProof {
     pub proof: Vec<EtxRangeProof>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
 pub struct EtxRangeProof {
     pub shares: Vec<Vec<u8>>,
     pub proof: NamespaceProof<NamespacedSha2Hasher>,
@@ -20,7 +21,7 @@ pub struct EtxRangeProof {
     pub start_offset: usize,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
 
 pub struct RelevantRowProof {
     pub leaves: Vec<Vec<u8>>,

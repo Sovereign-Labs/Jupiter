@@ -5,17 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "testapp"
-path = "src/bin/main.rs" #
-
 [dependencies]
-sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "80010ef48750dddc590eac887be1f892ee51feed" }
+sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "5e43c3ee9b5785abdca33b21c86fd38dbd9285e0" }
 tendermint = "0.27"
 
 prost = "0.11"
 prost-types = "0.11"
-# borsh = { git = "https://github.com/preston-evans98/borsh-rs.git", features = ["bytes"] }
 borsh = { version = "0.10.3", features = ["bytes"] }
 
 # Convenience
@@ -34,11 +29,11 @@ tracing-subscriber = "0.3.16"
 
 
 #nmt-rs = { path = "../nmt-rs", features = ["serde", "borsh"] }
-nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git", features = ["serde", "borsh"] }
+nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git", rev = "36bffad64cf257264069e3b04679d945d0a0af36", features = ["serde", "borsh"] }
 
 [build-dependencies]
 prost-build = { version = "0.11" }
 
-[patch.crates-io]
-# Patch borsh until "bytes" support is added
-borsh = { git = "https://github.com/preston-evans98/borsh-rs.git", branch = "release-2" }
+
+#[patch.'https://github.com/Sovereign-Labs/sovereign.git']
+#sovereign-sdk = { path = "../sovereign/sdk" }
