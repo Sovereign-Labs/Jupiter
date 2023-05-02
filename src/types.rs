@@ -239,19 +239,21 @@ mod tests {
         "/////////////////////7gaLStbqIBiy2pxi1D68MFUpq6sVxWBB4zdQHWHP/Tl",
     ];
 
-    #[test]
-    fn test_known_good_msg() {
-        let msg = r#"[{"Proof":{"End":1,"Nodes":[{"/":"bagao4amb5yatb7777777777773777777777777tjxe2jqsatxobgu3jqwkwsefsxscursxyaqzvvrxzv73aphwunua"},{"/":"bagao4amb5yatb77777777777777777777777776yvm54zu2vfqwyhd2nsebctxar7pxutz6uya7z3m2tzsmdtshjbm"}],"Start":0},"Shares":["c292LXRlc3QBKHsia2V5IjogInRlc3RrZXkiLCAidmFsdWUiOiAidGVzdHZhbHVlIn0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]}]"#;
-        let deserialized: RpcNamespacedSharesResponse =
-            serde_json::from_str(msg).expect("message must deserialize");
+    // TODO: Re-enable this test after Celestia releases an endpoint which returns nmt proofs instead of
+    // ipld.Proofs
+    // #[test]
+    // fn test_known_good_msg() {
+    // let msg = r#"[{"Proof":{"End":1,"Nodes":[{"/":"bagao4amb5yatb7777777777773777777777777tjxe2jqsatxobgu3jqwkwsefsxscursxyaqzvvrxzv73aphwunua"},{"/":"bagao4amb5yatb77777777777777777777777776yvm54zu2vfqwyhd2nsebctxar7pxutz6uya7z3m2tzsmdtshjbm"}],"Start":0},"Shares":["c292LXRlc3QBKHsia2V5IjogInRlc3RrZXkiLCAidmFsdWUiOiAidGVzdHZhbHVlIn0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]}]"#;
+    //     let deserialized: RpcNamespacedSharesResponse =
+    //         serde_json::from_str(msg).expect("message must deserialize");
 
-        let root = ns_hash_from_b64(ROW_ROOTS[0]);
+    //     let root = ns_hash_from_b64(ROW_ROOTS[0]);
 
-        for row in deserialized.0.expect("shares response is not empty") {
-            let proof: NamespaceProof<NamespacedSha2Hasher> = row.proof.into();
-            proof
-                .verify_range(&root, &row.shares, ROLLUP_NAMESPACE)
-                .expect("proof should be valid");
-        }
-    }
+    //     for row in deserialized.0.expect("shares response is not empty") {
+    //         let proof: NamespaceProof<NamespacedSha2Hasher> = row.proof.into();
+    //         proof
+    //             .verify_range(&root, &row.shares, ROLLUP_NAMESPACE)
+    //             .expect("proof should be valid");
+    //     }
+    // }
 }

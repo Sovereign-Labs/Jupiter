@@ -1,0 +1,46 @@
+name: Rust
+
+on:
+  push:
+    branches: ["research"]
+  pull_request:
+    branches: ["research"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.3
+        with:
+          version: "v0.4.0"
+      - name: Run cargo check
+        run: cargo check
+      - name: Run cargo fmt check
+        run: |
+          if ! cargo fmt --check ; then
+            echo "Formatting errors detected, please rune `cargo fmt` to fix it";
+            exit 1
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.3
+        with:
+          version: "v0.4.0"
+      - name: Run cargo test
+        run: cargo test
