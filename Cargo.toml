@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "e848baea380880d7c95d3d5cfbf7486c51fe3b79" }
+sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "5e43c3ee9b5785abdca33b21c86fd38dbd9285e0" }
 tendermint = "0.32"
 tendermint-proto = "0.32"
 
