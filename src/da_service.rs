@@ -1,36 +1,25 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use borsh::{BorshDeserialize, BorshSerialize};
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
-use nmt_rs::{CelestiaNmt, NamespaceId, NamespacedHash};
-use serde::Deserialize;
-use sovereign_sdk::{
-    serial::{Decode, DecodeBorrowed, Encode},
-    services::da::{DaService, SlotData},
-    Bytes,
-};
-use tendermint::merkle;
+use nmt_rs::NamespaceId;
+use sovereign_sdk::services::da::DaService;
 use tracing::{debug, info, span, Level};
 
 // 0x736f762d74657374 = b"sov-test"
 // pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId(b"sov-test");
-pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId([115, 111, 118, 45, 116, 101, 115, 116]);
-pub const PFB_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000000004"));
-pub const PARITY_SHARES_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("ffffffffffffffff"));
 
 use crate::{
-    da_app::{
-        address::CelestiaAddress,
-        proofs::{CompletenessProof, CorrectnessProof},
-        CelestiaSpec,
-    },
     parse_pfb_namespace,
-    pfb::MsgPayForBlobs,
     share_commit::recreate_commitment,
     shares::{NamespaceGroup, Share},
-    types::{ExtendedDataSquare, RpcNamespacedSharesResponse},
+    types::{ExtendedDataSquare, FilteredCelestiaBlock, Row, RpcNamespacedSharesResponse},
     utils::BoxError,
-    BlobWithSender, CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader, TxPosition,
+    verifier::{
+        address::CelestiaAddress,
+        proofs::{CompletenessProof, CorrectnessProof},
+        CelestiaSpec, PFB_NAMESPACE, ROLLUP_NAMESPACE,
+    },
+    BlobWithSender, CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader,
 };
 
 #[derive(Debug, Clone)]
@@ -41,100 +30,6 @@ pub struct CelestiaService {
 impl CelestiaService {
     pub fn with_client(client: HttpClient) -> Self {
         Self { client }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
-pub struct FilteredCelestiaBlock {
-    pub header: CelestiaHeader,
-    pub rollup_data: NamespaceGroup,
-    /// A mapping from blob commitment to the PFB containing that commitment
-    /// for each blob addressed to the rollup namespace
-    pub relevant_pfbs: HashMap<Bytes, (MsgPayForBlobs, TxPosition)>,
-    /// All rows in the extended data square which contain rollup data
-    pub rollup_rows: Vec<Row>,
-    /// All rows in the extended data square which contain pfb data
-    pub pfb_rows: Vec<Row>,
-}
-
-impl Encode for FilteredCelestiaBlock {
-    fn encode(&self, target: &mut impl std::io::Write) {
-        serde_cbor::ser::to_writer(target, self).expect("serializing to writer should not fail");
-    }
-}
-
-impl Decode for FilteredCelestiaBlock {
-    type Error = anyhow::Error;
-
-    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
-        Ok(serde_cbor::de::from_reader(target)?)
-    }
-}
-
-impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
-    type Error = anyhow::Error;
-
-    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
-        Ok(serde_cbor::de::from_slice(target)?)
-    }
-}
-
-impl SlotData for FilteredCelestiaBlock {
-    fn hash(&self) -> [u8; 32] {
-        match self.header.header.hash() {
-            tendermint::Hash::Sha256(h) => h,
-            tendermint::Hash::None => unreachable!("tendermint::Hash::None should not be possible"),
-        }
-    }
-}
-impl FilteredCelestiaBlock {
-    pub fn square_size(&self) -> usize {
-        self.header.square_size()
-    }
-
-    pub fn get_row_number(&self, share_idx: usize) -> usize {
-        share_idx / self.square_size()
-    }
-    pub fn get_col_number(&self, share_idx: usize) -> usize {
-        share_idx % self.square_size()
-    }
-
-    pub fn row_root_for_share(&self, share_idx: usize) -> &NamespacedHash {
-        &self.header.dah.row_roots[self.get_row_number(share_idx)]
-    }
-
-    pub fn col_root_for_share(&self, share_idx: usize) -> &NamespacedHash {
-        &self.header.dah.column_roots[self.get_col_number(share_idx)]
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum ValidationError {
-    MissingDataHash,
-    InvalidDataRoot,
-    InvalidEtxProof(&'static str),
-    MissingTx,
-    InvalidRowProof,
-    InvalidSigner,
-}
-
-impl CelestiaHeader {
-    pub fn validate_dah(&self) -> Result<(), ValidationError> {
-        let rows_iter = self.dah.row_roots.iter();
-        let cols_iter = self.dah.column_roots.iter();
-        let byte_vecs = rows_iter
-            .chain(cols_iter)
-            .map(|hash| hash.0.to_vec())
-            .collect();
-        let root = merkle::simple_hash_from_byte_vectors(byte_vecs);
-        let data_hash = self
-            .header
-            .data_hash
-            .ok_or(ValidationError::MissingDataHash)?;
-        if &root != <tendermint::Hash as AsRef<[u8]>>::as_ref(&data_hash) {
-            return Err(ValidationError::InvalidDataRoot);
-        }
-        Ok(())
     }
 }
 
@@ -245,10 +140,7 @@ impl DaService for CelestiaService {
             }
 
             let filtered_block = FilteredCelestiaBlock {
-                header: CelestiaHeader {
-                    header: unmarshalled_header.header,
-                    dah,
-                },
+                header: CelestiaHeader::new(dah, unmarshalled_header.header.into()),
                 rollup_data: rollup_shares,
                 relevant_pfbs: pfd_map,
                 rollup_rows,
@@ -301,33 +193,6 @@ impl DaService for CelestiaService {
         let rollup_row_proofs = CompletenessProof::from_filtered_block(&block);
 
         (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
-    }
-}
-
-#[derive(
-    Debug, Clone, PartialEq, serde::Serialize, Deserialize, BorshDeserialize, BorshSerialize,
-)]
-pub struct Row {
-    pub shares: Vec<Share>,
-    pub root: NamespacedHash,
-}
-
-impl Row {
-    pub fn merklized(&self) -> CelestiaNmt {
-        let mut nmt = CelestiaNmt::new();
-        for (idx, share) in self.shares.iter().enumerate() {
-            // Shares in the two left-hand quadrants are prefixed with their namespace, while parity
-            // shares (in the right-hand) quadrants always have the PARITY_SHARES_NAMESPACE
-            let namespace = if idx < self.shares.len() / 2 {
-                share.namespace()
-            } else {
-                PARITY_SHARES_NAMESPACE
-            };
-            nmt.push_leaf(share.as_serialized(), namespace)
-                .expect("shares are pushed in order");
-        }
-        assert_eq!(&nmt.root(), &self.root);
-        nmt
     }
 }
 

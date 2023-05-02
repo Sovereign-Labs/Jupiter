@@ -1,6 +1,6 @@
 use crate::shares::{self, Share};
 
-use tendermint::merkle::simple_hash_from_byte_vectors;
+use tendermint::{crypto::default::Sha256, merkle::simple_hash_from_byte_vectors};
 
 // /// Calculates the size of the smallest square that could be used to commit
 // /// to this message, following Celestia's "non-interactive default rules"
@@ -54,12 +54,7 @@ pub fn recreate_commitment(
         }
         subtree_roots.push(tree.root());
     }
-    let h = simple_hash_from_byte_vectors(
-        subtree_roots
-            .into_iter()
-            .map(|x| x.as_ref().to_vec())
-            .collect(),
-    );
+    let h = simple_hash_from_byte_vectors::<Sha256>(&subtree_roots);
     Ok(h)
 }
 
