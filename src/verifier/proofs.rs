@@ -1,12 +1,10 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
+use nmt_rs::{NamespaceId, NamespaceProof, NamespacedSha2Hasher};
 
 use crate::{
     share_commit::recreate_commitment, shares::BlobRef, types::FilteredCelestiaBlock,
     BlobWithSender,
 };
-
-use super::ROLLUP_NAMESPACE;
 
 #[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
 pub struct EtxProof {
@@ -32,11 +30,11 @@ pub struct RelevantRowProof {
 pub struct CompletenessProof(pub Vec<RelevantRowProof>);
 
 impl CompletenessProof {
-    pub fn from_filtered_block(block: &FilteredCelestiaBlock) -> Self {
+    pub fn from_filtered_block(block: &FilteredCelestiaBlock, namespace: NamespaceId) -> Self {
         let mut row_proofs = Vec::new();
         for row in block.rollup_rows.iter() {
             let mut nmt = row.merklized();
-            let (leaves, proof) = nmt.get_namespace_with_proof(ROLLUP_NAMESPACE);
+            let (leaves, proof) = nmt.get_namespace_with_proof(namespace);
             let row_proof = RelevantRowProof { leaves, proof };
             row_proofs.push(row_proof)
         }
