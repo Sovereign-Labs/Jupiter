@@ -1,12 +1,16 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
+use jsonrpsee::{
+    core::client::ClientT,
+    http_client::{HeaderMap, HttpClient},
+};
 use nmt_rs::NamespaceId;
 use sovereign_sdk::services::da::DaService;
 use tracing::{debug, info, span, Level};
 
 // 0x736f762d74657374 = b"sov-test"
-// pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId(b"sov-test");
+// For testing, use this NamespaceId (b"sov-test"):
+// pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId([115, 111, 118, 45, 116, 101, 115, 116]);
 
 use crate::{
     parse_pfb_namespace,
@@ -17,7 +21,7 @@ use crate::{
     verifier::{
         address::CelestiaAddress,
         proofs::{CompletenessProof, CorrectnessProof},
-        CelestiaSpec, PFB_NAMESPACE, ROLLUP_NAMESPACE,
+        CelestiaSpec, RollupParams, PFB_NAMESPACE,
     },
     BlobWithSender, CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader,
 };
@@ -25,25 +29,28 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct CelestiaService {
     client: HttpClient,
+    rollup_namespace: NamespaceId,
 }
 
 impl CelestiaService {
-    pub fn with_client(client: HttpClient) -> Self {
-        Self { client }
+    pub fn with_client(client: HttpClient, nid: NamespaceId) -> Self {
+        Self {
+            client,
+            rollup_namespace: nid,
+        }
     }
 }
 
-impl CelestiaService {}
-
 /// Fetch the rollup namespace shares and etx data. Returns a tuple `(rollup_shares, etx_shares)`
-pub async fn fetch_needed_shares_by_header(
+async fn fetch_needed_shares_by_header(
+    rollup_namespace: NamespaceId,
     client: &HttpClient,
     header: &serde_json::Value,
 ) -> Result<(NamespaceGroup, NamespaceGroup), BoxError> {
     let dah = header
         .get("dah")
         .ok_or(BoxError::msg("missing dah in block header"))?;
-    let rollup_namespace_str = base64::encode(ROLLUP_NAMESPACE).into();
+    let rollup_namespace_str = base64::encode(rollup_namespace).into();
     let rollup_shares_future = {
         let params: Vec<&serde_json::Value> = vec![dah, &rollup_namespace_str];
         client.request::<RpcNamespacedSharesResponse, _>("share.GetSharesByNamespace", params)
@@ -77,6 +84,26 @@ pub async fn fetch_needed_shares_by_header(
 
     Ok((rollup_shares, tx_data))
 }
+/// Runtime configuration for the DA service
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct DaServiceConfig {
+    /// The jwt used to authenticate with the Celestia rpc server
+    pub celestia_rpc_auth_token: String,
+    /// The address of the Celestia rpc server
+    #[serde(default = "default_rpc_addr")]
+    pub celestia_rpc_address: String,
+    /// The maximum size of a Celestia RPC response, in bytes
+    #[serde(default = "default_max_response_size")]
+    pub max_celestia_response_body_size: u32,
+}
+
+fn default_rpc_addr() -> String {
+    "http://localhost:11111/".into()
+}
+
+fn default_max_response_size() -> u32 {
+    1024 * 1024 * 100 // 100 MB
+}
 
 impl DaService for CelestiaService {
     type FilteredBlock = FilteredCelestiaBlock;
@@ -87,8 +114,30 @@ impl DaService for CelestiaService {
 
     type Error = BoxError;
 
+    type RuntimeConfig = DaServiceConfig;
+
+    fn new(config: Self::RuntimeConfig, chain_params: RollupParams) -> Self {
+        let client = {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "Authorization",
+                format!("Bearer {}", config.celestia_rpc_auth_token)
+                    .parse()
+                    .unwrap(),
+            );
+            jsonrpsee::http_client::HttpClientBuilder::default()
+                .set_headers(headers)
+                .max_request_body_size(config.max_celestia_response_body_size) // 100 MB
+                .build(&config.celestia_rpc_address)
+        }
+        .expect("Client initialization is valid");
+
+        Self::with_client(client, chain_params.namespace)
+    }
+
     fn get_finalized_at(&self, height: u64) -> Self::Future<Self::FilteredBlock> {
         let client = self.client.clone();
+        let rollup_namespace = self.rollup_namespace.clone();
         Box::pin(async move {
             let _span = span!(Level::TRACE, "fetching finalized block", height = height);
             // Fetch the header and relevant shares via RPC
@@ -98,7 +147,8 @@ impl DaService for CelestiaService {
                 .await?;
             debug!(header_result = ?header);
             info!("Fetching shares...");
-            let (rollup_shares, tx_data) = fetch_needed_shares_by_header(&client, &header).await?;
+            let (rollup_shares, tx_data) =
+                fetch_needed_shares_by_header(rollup_namespace, &client, &header).await?;
 
             info!("Fetching EDS...");
             // Fetch entire extended data square
@@ -120,7 +170,7 @@ impl DaService for CelestiaService {
                     .await?;
             // Parse out all of the rows containing rollup data
             let rollup_rows = get_rows_containing_namespace(
-                ROLLUP_NAMESPACE,
+                rollup_namespace,
                 &dah,
                 data_square.rows()?.into_iter(),
             )
@@ -132,7 +182,7 @@ impl DaService for CelestiaService {
             let mut pfd_map = HashMap::new();
             for tx in pfds {
                 for (idx, nid) in tx.0.namespace_ids.iter().enumerate() {
-                    if nid == &ROLLUP_NAMESPACE.0[..] {
+                    if nid == &rollup_namespace.0[..] {
                         // TODO: Retool this map to avoid cloning txs
                         pfd_map.insert(tx.0.share_commitments[idx].clone(), tx.clone());
                     }
@@ -190,7 +240,8 @@ impl DaService for CelestiaService {
     ) {
         let relevant_txs = self.extract_relevant_txs(block.clone());
         let etx_proofs = CorrectnessProof::for_block(&block, &relevant_txs);
-        let rollup_row_proofs = CompletenessProof::from_filtered_block(&block);
+        let rollup_row_proofs =
+            CompletenessProof::from_filtered_block(&block, self.rollup_namespace);
 
         (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
     }

@@ -226,18 +226,16 @@ fn ns_hash_from_b64(input: &str) -> NamespacedHash {
 #[cfg(test)]
 mod tests {
 
-    use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
+    // use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
 
-    use crate::verifier::ROLLUP_NAMESPACE;
+    // use super::{ns_hash_from_b64, RpcNamespacedSharesResponse};
 
-    use super::{ns_hash_from_b64, RpcNamespacedSharesResponse};
-
-    const ROW_ROOTS: &[&'static str] = &[
-        "AAAAAAAAAAEAAAAAAAAAAT4A1HvHQCYkf1sQ7zmTJH11jd1Hxn+YCcC9mIGbl1WJ",
-        "c292LXRlc3T//////////vSMLQPlgfwCOf4QTkOhMnQxk6ra3lI+ybCMfUyanYSd",
-        "/////////////////////wp55V2JEu8z3LhdNIIqxbq6uvpyGSGu7prq67ajVVAt",
-        "/////////////////////7gaLStbqIBiy2pxi1D68MFUpq6sVxWBB4zdQHWHP/Tl",
-    ];
+    // const ROW_ROOTS: &[&'static str] = &[
+    //     "AAAAAAAAAAEAAAAAAAAAAT4A1HvHQCYkf1sQ7zmTJH11jd1Hxn+YCcC9mIGbl1WJ",
+    //     "c292LXRlc3T//////////vSMLQPlgfwCOf4QTkOhMnQxk6ra3lI+ybCMfUyanYSd",
+    //     "/////////////////////wp55V2JEu8z3LhdNIIqxbq6uvpyGSGu7prq67ajVVAt",
+    //     "/////////////////////7gaLStbqIBiy2pxi1D68MFUpq6sVxWBB4zdQHWHP/Tl",
+    // ];
 
     // TODO: Re-enable this test after Celestia releases an endpoint which returns nmt proofs instead of
     // ipld.Proofs
