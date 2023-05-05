@@ -10,6 +10,8 @@ use sovereign_sdk::{
 };
 use tendermint::{crypto::default::Sha256, merkle};
 
+pub use nmt_rs::NamespaceId;
+
 use crate::{
     pfb::MsgPayForBlobs,
     shares::{NamespaceGroup, Share},

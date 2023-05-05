@@ -27,8 +27,9 @@ pub struct CelestiaVerifier {
 pub const PFB_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000000004"));
 pub const PARITY_SHARES_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("ffffffffffffffff"));
 
-impl BlobTransactionTrait<CelestiaAddress> for BlobWithSender {
+impl BlobTransactionTrait for BlobWithSender {
     type Data = BlobIterator;
+    type Address = CelestiaAddress;
     fn sender(&self) -> CelestiaAddress {
         self.sender.clone()
     }
@@ -108,8 +109,6 @@ pub struct CelestiaSpec;
 
 impl DaSpec for CelestiaSpec {
     type SlotHash = TmHash;
-
-    type Address = CelestiaAddress;
 
     type BlockHeader = CelestiaHeader;
 
