@@ -8,7 +8,7 @@ use prost::{
     encoding::decode_varint,
     DecodeError,
 };
-use serde::{de::Error, Deserialize};
+use serde::{de::Error, Deserialize, Serialize};
 use sovereign_sdk::{
     core::crypto::hash::{sha2, Sha2Hash},
     Bytes,
@@ -173,7 +173,7 @@ impl Share {
         match self {
             Share::Continuation(_) => {
                 let reserved_bytes_offset = NAMESPACE_ID_LEN + INFO_BYTE_LEN;
-                let mut raw = self.raw_inner().clone();
+                let mut raw = self.raw_inner();
                 raw.advance(reserved_bytes_offset);
                 let idx_of_next_start = raw.get_u32() as usize;
                 if idx_of_next_start == 0 {
@@ -182,7 +182,7 @@ impl Share {
                     Some(idx_of_next_start - self.get_data_offset())
                 }
             }
-            // Start shares always have a sequence begining at the first byte
+            // Start shares always have a sequence beginning at the first byte
             Share::Start(_) => Some(0),
         }
     }
@@ -294,7 +294,7 @@ impl NamespaceGroup {
     }
 
     pub fn from_b64_shares(encoded_shares: &Vec<String>) -> Result<Self, ShareParsingError> {
-        if encoded_shares.len() == 0 {
+        if encoded_shares.is_empty() {
             return Ok(Self::Sparse(vec![]));
         }
         let mut shares = Vec::with_capacity(encoded_shares.len());
@@ -343,7 +343,7 @@ impl NamespaceGroup {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, BorshDeserialize, BorshSerialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct Blob(pub Vec<Share>);
 
 impl<'a> From<BlobRef<'a>> for Blob {
