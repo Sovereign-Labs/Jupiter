@@ -1,8 +1,7 @@
 use nmt_rs::NamespaceId;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash, DaSpec},
-    serial::{Decode, DecodeBorrowed, DeserializationError, Encode},
     Bytes,
 };
 
@@ -20,14 +19,16 @@ use proofs::*;
 
 use self::address::CelestiaAddress;
 
-pub struct CelestiaVerifier;
+pub struct CelestiaVerifier {
+    pub rollup_namespace: NamespaceId,
+}
 
-pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId([115, 111, 118, 45, 116, 101, 115, 116]);
 pub const PFB_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000000004"));
 pub const PARITY_SHARES_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("ffffffffffffffff"));
 
-impl BlobTransactionTrait<CelestiaAddress> for BlobWithSender {
+impl BlobTransactionTrait for BlobWithSender {
     type Data = BlobIterator;
+    type Address = CelestiaAddress;
     fn sender(&self) -> CelestiaAddress {
         self.sender.clone()
     }
@@ -36,8 +37,11 @@ impl BlobTransactionTrait<CelestiaAddress> for BlobWithSender {
         self.blob.clone().into_iter()
     }
 }
-#[derive(Debug, PartialEq, Clone, Eq, Hash, serde::Serialize, Deserialize)]
 
+#[derive(Debug, PartialEq, Clone, Eq, Hash, Serialize, Deserialize)]
+// Important: #[repr(transparent)] is required for safety as long as we're using
+// std::mem::transmute to implement AsRef<TmHash> for tendermint::Hash
+#[repr(transparent)]
 pub struct TmHash(pub tendermint::Hash);
 
 impl AsRef<[u8]> for TmHash {
@@ -57,53 +61,19 @@ impl TmHash {
 
 impl AsRef<TmHash> for tendermint::Hash {
     fn as_ref(&self) -> &TmHash {
+        // Safety: #[repr(transparent)] guarantees that the memory layout of TmHash is
+        // the same as tendermint::Hash, so this `transmute` is sound.
+        // See https://doc.rust-lang.org/nomicon/other-reprs.html#reprtransparent
         unsafe { std::mem::transmute(self) }
     }
 }
 
 impl BlockHash for TmHash {}
 
-impl Decode for TmHash {
-    type Error = sovereign_sdk::serial::DeserializationError;
-
-    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
-        //  TODO: make this reasonable
-        let mut out = [0u8; 32];
-        target
-            .read_exact(&mut out)
-            .map_err(|_| DeserializationError::DataTooShort {
-                expected: 32,
-                got: 1,
-            })?;
-        Ok(TmHash(tendermint::Hash::Sha256(out)))
-    }
-}
-
-impl<'de> DecodeBorrowed<'de> for TmHash {
-    type Error = sovereign_sdk::serial::DeserializationError;
-
-    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&target[..32]);
-        Ok(TmHash(tendermint::Hash::Sha256(out)))
-    }
-}
-
-impl Encode for TmHash {
-    fn encode(&self, target: &mut impl std::io::Write) {
-        // TODO: make this reasonable
-        target
-            .write_all(self.as_ref())
-            .expect("Serialization should not fail")
-    }
-}
-
 pub struct CelestiaSpec;
 
 impl DaSpec for CelestiaSpec {
     type SlotHash = TmHash;
-
-    type Address = CelestiaAddress;
 
     type BlockHeader = CelestiaHeader;
 
@@ -112,12 +82,25 @@ impl DaSpec for CelestiaSpec {
     type InclusionMultiProof = Vec<EtxProof>;
 
     type CompletenessProof = Vec<RelevantRowProof>;
+
+    type ChainParams = RollupParams;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RollupParams {
+    pub namespace: NamespaceId,
 }
 
 impl da::DaVerifier for CelestiaVerifier {
     type Spec = CelestiaSpec;
 
     type Error = ValidationError;
+
+    fn new(params: <Self::Spec as DaSpec>::ChainParams) -> Self {
+        Self {
+            rollup_namespace: params.namespace,
+        }
+    }
 
     fn verify_relevant_tx_list(
         &self,
@@ -131,7 +114,7 @@ impl da::DaVerifier for CelestiaVerifier {
 
         // Check the validity and completeness of the rollup row proofs, against the DAH.
         // Extract the data from the row proofs and build a namespace_group from it
-        let rollup_shares_u8 = Self::verify_row_proofs(completeness_proof, &block_header.dah)?;
+        let rollup_shares_u8 = self.verify_row_proofs(completeness_proof, &block_header.dah)?;
         if rollup_shares_u8.is_empty() {
             if txs.is_empty() {
                 return Ok(());
@@ -198,7 +181,7 @@ impl da::DaVerifier for CelestiaVerifier {
 
             // Verify the sender and data of each blob which was sent into this namespace
             for (blob_idx, nid) in pfb.namespace_ids.iter().enumerate() {
-                if nid != &ROLLUP_NAMESPACE.0[..] {
+                if nid != &self.rollup_namespace.0[..] {
                     continue;
                 }
                 let tx = tx_iter.next().ok_or(ValidationError::MissingTx)?;
@@ -227,6 +210,7 @@ impl da::DaVerifier for CelestiaVerifier {
 
 impl CelestiaVerifier {
     pub fn verify_row_proofs(
+        &self,
         row_proofs: Vec<RelevantRowProof>,
         dah: &DataAvailabilityHeader,
     ) -> Result<Vec<Vec<u8>>, ValidationError> {
@@ -235,11 +219,11 @@ impl CelestiaVerifier {
         let mut rollup_shares_u8: Vec<Vec<u8>> = Vec::new();
         for row_root in dah.row_roots.iter() {
             // TODO: short circuit this loop at the first row after the rollup namespace
-            if row_root.contains(ROLLUP_NAMESPACE) {
+            if row_root.contains(self.rollup_namespace) {
                 let row_proof = row_proofs.next().ok_or(ValidationError::InvalidRowProof)?;
                 row_proof
                     .proof
-                    .verify_complete_namespace(row_root, &row_proof.leaves, ROLLUP_NAMESPACE)
+                    .verify_complete_namespace(row_root, &row_proof.leaves, self.rollup_namespace)
                     .expect("Proofs must be valid");
 
                 for leaf in row_proof.leaves {

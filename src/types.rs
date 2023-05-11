@@ -3,12 +3,10 @@ use std::collections::HashMap;
 use anyhow::ensure;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use sovereign_sdk::{
-    serial::{Decode, DecodeBorrowed, Encode},
-    services::da::SlotData,
-    Bytes,
-};
+use sovereign_sdk::{services::da::SlotData, Bytes};
 use tendermint::{crypto::default::Sha256, merkle};
+
+pub use nmt_rs::NamespaceId;
 
 use crate::{
     pfb::MsgPayForBlobs,
@@ -17,7 +15,8 @@ use crate::{
     verifier::PARITY_SHARES_NAMESPACE,
     CelestiaHeader, TxPosition,
 };
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct RpcNamespacedShares {
     #[serde(rename = "Proof")]
     pub proof: JsonNamespaceProof,
@@ -25,7 +24,7 @@ pub struct RpcNamespacedShares {
     pub shares: Vec<Share>,
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct JsonNamespaceProof {
     #[serde(rename = "Start")]
     start: usize,
@@ -35,7 +34,7 @@ pub struct JsonNamespaceProof {
     nodes: Option<Vec<StringWrapper>>,
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct ExtendedDataSquare {
     pub data_square: Vec<Share>,
     pub codec: String,
@@ -66,7 +65,7 @@ impl ExtendedDataSquare {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct FilteredCelestiaBlock {
     pub header: CelestiaHeader,
     pub rollup_data: NamespaceGroup,
@@ -79,28 +78,6 @@ pub struct FilteredCelestiaBlock {
     pub pfb_rows: Vec<Row>,
 }
 
-impl Encode for FilteredCelestiaBlock {
-    fn encode(&self, target: &mut impl std::io::Write) {
-        serde_cbor::ser::to_writer(target, self).expect("serializing to writer should not fail");
-    }
-}
-
-impl Decode for FilteredCelestiaBlock {
-    type Error = anyhow::Error;
-
-    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
-        Ok(serde_cbor::de::from_reader(target)?)
-    }
-}
-
-impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
-    type Error = anyhow::Error;
-
-    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
-        Ok(serde_cbor::de::from_slice(target)?)
-    }
-}
-
 impl SlotData for FilteredCelestiaBlock {
     fn hash(&self) -> [u8; 32] {
         match self.header.header.hash() {
@@ -109,6 +86,7 @@ impl SlotData for FilteredCelestiaBlock {
         }
     }
 }
+
 impl FilteredCelestiaBlock {
     pub fn square_size(&self) -> usize {
         self.header.square_size()
@@ -158,9 +136,7 @@ impl CelestiaHeader {
     }
 }
 
-#[derive(
-    Debug, Clone, PartialEq, serde::Serialize, Deserialize, BorshDeserialize, BorshSerialize,
-)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct Row {
     pub shares: Vec<Share>,
     pub root: NamespacedHash,
@@ -226,18 +202,16 @@ fn ns_hash_from_b64(input: &str) -> NamespacedHash {
 #[cfg(test)]
 mod tests {
 
-    use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
+    // use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
 
-    use crate::verifier::ROLLUP_NAMESPACE;
+    // use super::{ns_hash_from_b64, RpcNamespacedSharesResponse};
 
-    use super::{ns_hash_from_b64, RpcNamespacedSharesResponse};
-
-    const ROW_ROOTS: &[&'static str] = &[
-        "AAAAAAAAAAEAAAAAAAAAAT4A1HvHQCYkf1sQ7zmTJH11jd1Hxn+YCcC9mIGbl1WJ",
-        "c292LXRlc3T//////////vSMLQPlgfwCOf4QTkOhMnQxk6ra3lI+ybCMfUyanYSd",
-        "/////////////////////wp55V2JEu8z3LhdNIIqxbq6uvpyGSGu7prq67ajVVAt",
-        "/////////////////////7gaLStbqIBiy2pxi1D68MFUpq6sVxWBB4zdQHWHP/Tl",
-    ];
+    // const ROW_ROOTS: &[&'static str] = &[
+    //     "AAAAAAAAAAEAAAAAAAAAAT4A1HvHQCYkf1sQ7zmTJH11jd1Hxn+YCcC9mIGbl1WJ",
+    //     "c292LXRlc3T//////////vSMLQPlgfwCOf4QTkOhMnQxk6ra3lI+ybCMfUyanYSd",
+    //     "/////////////////////wp55V2JEu8z3LhdNIIqxbq6uvpyGSGu7prq67ajVVAt",
+    //     "/////////////////////7gaLStbqIBiy2pxi1D68MFUpq6sVxWBB4zdQHWHP/Tl",
+    // ];
 
     // TODO: Re-enable this test after Celestia releases an endpoint which returns nmt proofs instead of
     // ipld.Proofs
