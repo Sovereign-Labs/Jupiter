@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "93bc397a51ed14c1953b570421f299c9a7f76294" }
+sovereign-sdk =  { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "3f948c098cf37040de3aaf2a86a18a1d91d082be" }
 tendermint = "0.32"
 tendermint-proto = "0.32"
 
@@ -48,3 +48,6 @@ verifier = []
 
 [patch.'https://github.com/Sovereign-Labs/sovereign.git']
 sovereign-sdk = { path = "../sovereign/sdk" }
+
+[patch.'https://github.com/Sovereign-Labs/nmt-rs.git']
+nmt-rs = { path = "../nmt-rs/" }

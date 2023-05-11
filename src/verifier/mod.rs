@@ -1,8 +1,7 @@
 use nmt_rs::NamespaceId;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash, DaSpec},
-    serial::{Decode, DecodeBorrowed, DeserializationError, Encode},
     Bytes,
 };
 
@@ -38,7 +37,8 @@ impl BlobTransactionTrait for BlobWithSender {
         self.blob.clone().into_iter()
     }
 }
-#[derive(Debug, PartialEq, Clone, Eq, Hash, serde::Serialize, Deserialize)]
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash, Serialize, Deserialize)]
 // Important: #[repr(transparent)] is required for safety as long as we're using
 // std::mem::transmute to implement AsRef<TmHash> for tendermint::Hash
 #[repr(transparent)]
@@ -70,41 +70,6 @@ impl AsRef<TmHash> for tendermint::Hash {
 
 impl BlockHash for TmHash {}
 
-impl Decode for TmHash {
-    type Error = sovereign_sdk::serial::DeserializationError;
-
-    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
-        //  TODO: make this reasonable
-        let mut out = [0u8; 32];
-        target
-            .read_exact(&mut out)
-            .map_err(|_| DeserializationError::DataTooShort {
-                expected: 32,
-                got: 1,
-            })?;
-        Ok(TmHash(tendermint::Hash::Sha256(out)))
-    }
-}
-
-impl<'de> DecodeBorrowed<'de> for TmHash {
-    type Error = sovereign_sdk::serial::DeserializationError;
-
-    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&target[..32]);
-        Ok(TmHash(tendermint::Hash::Sha256(out)))
-    }
-}
-
-impl Encode for TmHash {
-    fn encode(&self, target: &mut impl std::io::Write) {
-        // TODO: make this reasonable
-        target
-            .write_all(self.as_ref())
-            .expect("Serialization should not fail")
-    }
-}
-
 pub struct CelestiaSpec;
 
 impl DaSpec for CelestiaSpec {
@@ -130,6 +95,12 @@ impl da::DaVerifier for CelestiaVerifier {
     type Spec = CelestiaSpec;
 
     type Error = ValidationError;
+
+    fn new(params: <Self::Spec as DaSpec>::ChainParams) -> Self {
+        Self {
+            rollup_namespace: params.namespace,
+        }
+    }
 
     fn verify_relevant_tx_list(
         &self,
@@ -234,12 +205,6 @@ impl da::DaVerifier for CelestiaVerifier {
         }
 
         Ok(())
-    }
-
-    fn new(params: <Self::Spec as DaSpec>::ChainParams) -> Self {
-        Self {
-            rollup_namespace: params.namespace,
-        }
     }
 }
 

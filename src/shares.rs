@@ -8,7 +8,7 @@ use prost::{
     encoding::decode_varint,
     DecodeError,
 };
-use serde::{de::Error, Deserialize};
+use serde::{de::Error, Deserialize, Serialize};
 use sovereign_sdk::{
     core::crypto::hash::{sha2, Sha2Hash},
     Bytes,
@@ -343,7 +343,7 @@ impl NamespaceGroup {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, BorshDeserialize, BorshSerialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct Blob(pub Vec<Share>);
 
 impl<'a> From<BlobRef<'a>> for Blob {

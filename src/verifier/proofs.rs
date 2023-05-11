@@ -1,17 +1,18 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use nmt_rs::{NamespaceId, NamespaceProof, NamespacedSha2Hasher};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     share_commit::recreate_commitment, shares::BlobRef, types::FilteredCelestiaBlock,
     BlobWithSender,
 };
 
-#[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct EtxProof {
     pub proof: Vec<EtxRangeProof>,
 }
 
-#[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct EtxRangeProof {
     pub shares: Vec<Vec<u8>>,
     pub proof: NamespaceProof<NamespacedSha2Hasher>,
@@ -19,8 +20,7 @@ pub struct EtxRangeProof {
     pub start_offset: usize,
 }
 
-#[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
-
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct RelevantRowProof {
     pub leaves: Vec<Vec<u8>>,
     pub proof: NamespaceProof<NamespacedSha2Hasher>,

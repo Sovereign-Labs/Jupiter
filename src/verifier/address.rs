@@ -1,7 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use sovereign_sdk::core::traits::AddressTrait as Address;
+use serde::{Deserialize, Serialize};
+use sovereign_sdk::core::traits::AddressTrait;
+use std::fmt::{Display, Formatter};
 
-#[derive(Debug, PartialEq, Clone, Eq, BorshDeserialize, BorshSerialize)]
+#[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct CelestiaAddress(pub Vec<u8>);
 
 impl AsRef<[u8]> for CelestiaAddress {
@@ -9,7 +11,6 @@ impl AsRef<[u8]> for CelestiaAddress {
         self.0.as_ref()
     }
 }
-impl Address for CelestiaAddress {}
 
 impl<'a> TryFrom<&'a [u8]> for CelestiaAddress {
     type Error = anyhow::Error;
@@ -18,3 +19,17 @@ impl<'a> TryFrom<&'a [u8]> for CelestiaAddress {
         Ok(Self(value.to_vec()))
     }
 }
+
+impl From<[u8; 32]> for CelestiaAddress {
+    fn from(value: [u8; 32]) -> Self {
+        Self(value.to_vec())
+    }
+}
+
+impl Display for CelestiaAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{}", hex::encode(&self.0))
+    }
+}
+
+impl AddressTrait for CelestiaAddress {}

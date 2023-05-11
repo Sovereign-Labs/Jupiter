@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::{cell::RefCell, ops::Range};
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -43,7 +44,7 @@ pub struct PartialBlockId {
 /// a tendermint::block::Header from being deserialized in most formats except JSON. However
 /// it also provides a significant efficiency benefit over the standard tendermint type, which
 /// performs a complete protobuf serialization every time `.hash()` is called.
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct CompactHeader {
     /// Header version
     pub version: Vec<u8>,
@@ -182,9 +183,7 @@ impl CompactHeader {
     }
 }
 
-#[derive(
-    PartialEq, Debug, Clone, Deserialize, serde::Serialize, BorshDeserialize, BorshSerialize,
-)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct DataAvailabilityHeader {
     pub row_roots: Vec<NamespacedHash>,
     pub column_roots: Vec<NamespacedHash>,
@@ -224,16 +223,17 @@ pub struct CelestiaHeaderResponse {
     pub dah: MarshalledDataAvailabilityHeader,
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct NamespacedSharesResponse {
     pub shares: Option<Vec<String>>,
     pub height: u64,
 }
 
-#[derive(Debug, PartialEq, Clone, Deserialize, serde::Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct CelestiaHeader {
     pub dah: DataAvailabilityHeader,
     pub header: CompactHeader,
+    #[borsh_skip]
     #[serde(skip)]
     cached_prev_hash: RefCell<Option<TmHash>>,
 }
@@ -260,7 +260,7 @@ impl CanonicalHash for CelestiaHeader {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, BorshDeserialize, BorshSerialize)]
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 pub struct BlobWithSender {
     pub blob: Blob,
     pub sender: CelestiaAddress,
@@ -329,6 +329,21 @@ impl<'a> TryFrom<&'a [u8]> for H160 {
         anyhow::bail!("Adress is not exactly 20 bytes");
     }
 }
+
+impl From<[u8; 32]> for H160 {
+    fn from(value: [u8; 32]) -> Self {
+        let mut addr = [0u8; 20];
+        addr.copy_from_slice(&value[12..]);
+        Self(addr)
+    }
+}
+
+impl Display for H160 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{}", hex::encode(self.0))
+    }
+}
+
 impl Address for H160 {}
 
 pub fn parse_pfb_namespace(
