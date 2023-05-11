@@ -1,7 +1,22 @@
-use anyhow::ensure;
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-use crate::{shares::Share, utils::BoxError};
+use anyhow::ensure;
+use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
+use sovereign_sdk::{
+    serial::{Decode, DecodeBorrowed, Encode},
+    services::da::SlotData,
+    Bytes,
+};
+use tendermint::{crypto::default::Sha256, merkle};
+
+use crate::{
+    pfb::MsgPayForBlobs,
+    shares::{NamespaceGroup, Share},
+    utils::BoxError,
+    verifier::PARITY_SHARES_NAMESPACE,
+    CelestiaHeader, TxPosition,
+};
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct RpcNamespacedShares {
     #[serde(rename = "Proof")]
@@ -51,6 +66,125 @@ impl ExtendedDataSquare {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+pub struct FilteredCelestiaBlock {
+    pub header: CelestiaHeader,
+    pub rollup_data: NamespaceGroup,
+    /// A mapping from blob commitment to the PFB containing that commitment
+    /// for each blob addressed to the rollup namespace
+    pub relevant_pfbs: HashMap<Bytes, (MsgPayForBlobs, TxPosition)>,
+    /// All rows in the extended data square which contain rollup data
+    pub rollup_rows: Vec<Row>,
+    /// All rows in the extended data square which contain pfb data
+    pub pfb_rows: Vec<Row>,
+}
+
+impl Encode for FilteredCelestiaBlock {
+    fn encode(&self, target: &mut impl std::io::Write) {
+        serde_cbor::ser::to_writer(target, self).expect("serializing to writer should not fail");
+    }
+}
+
+impl Decode for FilteredCelestiaBlock {
+    type Error = anyhow::Error;
+
+    fn decode<R: std::io::Read>(target: &mut R) -> Result<Self, <Self as Decode>::Error> {
+        Ok(serde_cbor::de::from_reader(target)?)
+    }
+}
+
+impl<'de> DecodeBorrowed<'de> for FilteredCelestiaBlock {
+    type Error = anyhow::Error;
+
+    fn decode_from_slice(target: &'de [u8]) -> Result<Self, Self::Error> {
+        Ok(serde_cbor::de::from_slice(target)?)
+    }
+}
+
+impl SlotData for FilteredCelestiaBlock {
+    fn hash(&self) -> [u8; 32] {
+        match self.header.header.hash() {
+            tendermint::Hash::Sha256(h) => h,
+            tendermint::Hash::None => unreachable!("tendermint::Hash::None should not be possible"),
+        }
+    }
+}
+impl FilteredCelestiaBlock {
+    pub fn square_size(&self) -> usize {
+        self.header.square_size()
+    }
+
+    pub fn get_row_number(&self, share_idx: usize) -> usize {
+        share_idx / self.square_size()
+    }
+    pub fn get_col_number(&self, share_idx: usize) -> usize {
+        share_idx % self.square_size()
+    }
+
+    pub fn row_root_for_share(&self, share_idx: usize) -> &NamespacedHash {
+        &self.header.dah.row_roots[self.get_row_number(share_idx)]
+    }
+
+    pub fn col_root_for_share(&self, share_idx: usize) -> &NamespacedHash {
+        &self.header.dah.column_roots[self.get_col_number(share_idx)]
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ValidationError {
+    MissingDataHash,
+    InvalidDataRoot,
+    InvalidEtxProof(&'static str),
+    MissingTx,
+    InvalidRowProof,
+    InvalidSigner,
+}
+
+impl CelestiaHeader {
+    pub fn validate_dah(&self) -> Result<(), ValidationError> {
+        let rows_iter = self.dah.row_roots.iter();
+        let cols_iter = self.dah.column_roots.iter();
+        let byte_vecs: Vec<&NamespacedHash> = rows_iter.chain(cols_iter).collect();
+        let root = merkle::simple_hash_from_byte_vectors::<Sha256>(&byte_vecs);
+        let data_hash = self
+            .header
+            .data_hash
+            .as_ref()
+            .ok_or(ValidationError::MissingDataHash)?;
+        if &root != &data_hash.0 {
+            return Err(ValidationError::InvalidDataRoot);
+        }
+        Ok(())
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, Deserialize, BorshDeserialize, BorshSerialize,
+)]
+pub struct Row {
+    pub shares: Vec<Share>,
+    pub root: NamespacedHash,
+}
+
+impl Row {
+    pub fn merklized(&self) -> CelestiaNmt {
+        let mut nmt = CelestiaNmt::new();
+        for (idx, share) in self.shares.iter().enumerate() {
+            // Shares in the two left-hand quadrants are prefixed with their namespace, while parity
+            // shares (in the right-hand) quadrants always have the PARITY_SHARES_NAMESPACE
+            let namespace = if idx < self.shares.len() / 2 {
+                share.namespace()
+            } else {
+                PARITY_SHARES_NAMESPACE
+            };
+            nmt.push_leaf(share.as_serialized(), namespace)
+                .expect("shares are pushed in order");
+        }
+        assert_eq!(&nmt.root(), &self.root);
+        nmt
+    }
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct StringWrapper {
     #[serde(rename = "/")]
@@ -61,7 +195,7 @@ pub struct StringWrapper {
 pub struct RpcNamespacedSharesResponse(pub Option<Vec<RpcNamespacedShares>>);
 
 use nmt_rs::{
-    simple_merkle::proof::Proof, NamespaceProof, NamespacedHash, NamespacedSha2Hasher,
+    simple_merkle::proof::Proof, CelestiaNmt, NamespaceProof, NamespacedHash, NamespacedSha2Hasher,
     NAMESPACED_HASH_LEN,
 };
 
@@ -94,7 +228,7 @@ mod tests {
 
     use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
 
-    use crate::da_service::ROLLUP_NAMESPACE;
+    use crate::verifier::ROLLUP_NAMESPACE;
 
     use super::{ns_hash_from_b64, RpcNamespacedSharesResponse};
 
@@ -105,19 +239,21 @@ mod tests {
         "/////////////////////7gaLStbqIBiy2pxi1D68MFUpq6sVxWBB4zdQHWHP/Tl",
     ];
 
-    #[test]
-    fn test_known_good_msg() {
-        let msg = r#"[{"Proof":{"End":1,"Nodes":[{"/":"bagao4amb5yatb7777777777773777777777777tjxe2jqsatxobgu3jqwkwsefsxscursxyaqzvvrxzv73aphwunua"},{"/":"bagao4amb5yatb77777777777777777777777776yvm54zu2vfqwyhd2nsebctxar7pxutz6uya7z3m2tzsmdtshjbm"}],"Start":0},"Shares":["c292LXRlc3QBKHsia2V5IjogInRlc3RrZXkiLCAidmFsdWUiOiAidGVzdHZhbHVlIn0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]}]"#;
-        let deserialized: RpcNamespacedSharesResponse =
-            serde_json::from_str(msg).expect("message must deserialize");
+    // TODO: Re-enable this test after Celestia releases an endpoint which returns nmt proofs instead of
+    // ipld.Proofs
+    // #[test]
+    // fn test_known_good_msg() {
+    // let msg = r#"[{"Proof":{"End":1,"Nodes":[{"/":"bagao4amb5yatb7777777777773777777777777tjxe2jqsatxobgu3jqwkwsefsxscursxyaqzvvrxzv73aphwunua"},{"/":"bagao4amb5yatb77777777777777777777777776yvm54zu2vfqwyhd2nsebctxar7pxutz6uya7z3m2tzsmdtshjbm"}],"Start":0},"Shares":["c292LXRlc3QBKHsia2V5IjogInRlc3RrZXkiLCAidmFsdWUiOiAidGVzdHZhbHVlIn0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]}]"#;
+    //     let deserialized: RpcNamespacedSharesResponse =
+    //         serde_json::from_str(msg).expect("message must deserialize");
 
-        let root = ns_hash_from_b64(ROW_ROOTS[0]);
+    //     let root = ns_hash_from_b64(ROW_ROOTS[0]);
 
-        for row in deserialized.0.expect("shares response is not empty") {
-            let proof: NamespaceProof<NamespacedSha2Hasher> = row.proof.into();
-            proof
-                .verify_range(&root, &row.shares, ROLLUP_NAMESPACE)
-                .expect("proof should be valid");
-        }
-    }
+    //     for row in deserialized.0.expect("shares response is not empty") {
+    //         let proof: NamespaceProof<NamespacedSha2Hasher> = row.proof.into();
+    //         proof
+    //             .verify_range(&root, &row.shares, ROLLUP_NAMESPACE)
+    //             .expect("proof should be valid");
+    //     }
+    // }
 }

@@ -1,3 +1,4 @@
+use nmt_rs::NamespaceId;
 use serde::Deserialize;
 use sovereign_sdk::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash, DaSpec},
@@ -9,19 +10,21 @@ pub mod address;
 pub mod proofs;
 
 use crate::{
-    da_service::{ValidationError, PFB_NAMESPACE, ROLLUP_NAMESPACE},
     pfb_from_iter,
     share_commit::recreate_commitment,
     shares::{read_varint, BlobIterator, NamespaceGroup, Share},
+    types::ValidationError,
     BlobWithSender, CelestiaHeader, DataAvailabilityHeader,
 };
 use proofs::*;
 
 use self::address::CelestiaAddress;
 
-pub struct CelestiaApp<DB> {
-    pub db: DB,
-}
+pub struct CelestiaVerifier;
+
+pub const ROLLUP_NAMESPACE: NamespaceId = NamespaceId([115, 111, 118, 45, 116, 101, 115, 116]);
+pub const PFB_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("0000000000000004"));
+pub const PARITY_SHARES_NAMESPACE: NamespaceId = NamespaceId(hex_literal::hex!("ffffffffffffffff"));
 
 impl BlobTransactionTrait<CelestiaAddress> for BlobWithSender {
     type Data = BlobIterator;
@@ -111,7 +114,7 @@ impl DaSpec for CelestiaSpec {
     type CompletenessProof = Vec<RelevantRowProof>;
 }
 
-impl<DB> da::DaVerifier for CelestiaApp<DB> {
+impl da::DaVerifier for CelestiaVerifier {
     type Spec = CelestiaSpec;
 
     type Error = ValidationError;
@@ -222,7 +225,7 @@ impl<DB> da::DaVerifier for CelestiaApp<DB> {
     }
 }
 
-impl<DB> CelestiaApp<DB> {
+impl CelestiaVerifier {
     pub fn verify_row_proofs(
         row_proofs: Vec<RelevantRowProof>,
         dah: &DataAvailabilityHeader,

@@ -2,11 +2,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use nmt_rs::{NamespaceProof, NamespacedSha2Hasher};
 
 use crate::{
-    da_service::{FilteredCelestiaBlock, ROLLUP_NAMESPACE},
-    share_commit::recreate_commitment,
-    shares::BlobRef,
+    share_commit::recreate_commitment, shares::BlobRef, types::FilteredCelestiaBlock,
     BlobWithSender,
 };
+
+use super::ROLLUP_NAMESPACE;
 
 #[derive(Debug, PartialEq, Clone, BorshDeserialize, BorshSerialize)]
 pub struct EtxProof {

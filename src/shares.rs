@@ -15,7 +15,7 @@ use sovereign_sdk::{
 };
 use tracing::error;
 
-use crate::da_service::PFB_NAMESPACE;
+use crate::verifier::PFB_NAMESPACE;
 
 /// The length of the "reserved bytes" field in a compact share
 pub const RESERVED_BYTES_LEN: usize = 4;
