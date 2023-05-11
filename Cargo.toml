@@ -44,6 +44,3 @@ tendermint-proto = { git = "https://github.com/informalsystems/tendermint-rs.git
 default = ["native"]
 native = ["dep:tokio", "dep:reqwest", "dep:jsonrpsee"]
 verifier = []
-
-[patch.'https://github.com/Sovereign-Labs/sovereign.git']
-sovereign-sdk = { path = "../sovereign/sdk" }
