@@ -283,7 +283,7 @@ impl BlockHeader for CelestiaHeader {
             )
             .expect("must not call prev_hash on block with no predecessor")
             .hash;
-        *cached_hash = Some(TmHash(hash.clone()));
+        *cached_hash = Some(TmHash(hash));
         TmHash(hash)
     }
 }
