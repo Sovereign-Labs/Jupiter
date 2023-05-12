@@ -35,11 +35,6 @@ postcard = { version = "1", features = ["use-std"] }
 prost-build = { version = "0.11" }
 
 
-[patch.crates-io]
-# Patch tendermint until the "0.32" release lands. We need 0.32 to avoid a lot of unnecessary data copying during header verification
-tendermint = { git = "https://github.com/informalsystems/tendermint-rs.git", rev = "e014de927abed7c5fcbf8186780a61b5c9c1e775" }
-tendermint-proto = { git = "https://github.com/informalsystems/tendermint-rs.git", rev = "e014de927abed7c5fcbf8186780a61b5c9c1e775" }
-
 [features]
 default = ["native"]
 native = ["dep:tokio", "dep:reqwest", "dep:jsonrpsee"]
