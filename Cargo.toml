@@ -39,3 +39,6 @@ prost-build = { version = "0.11" }
 default = ["native"]
 native = ["dep:tokio", "dep:reqwest", "dep:jsonrpsee"]
 verifier = []
+
+[patch."https://github.com/Sovereign-Labs/sovereign.git"]
+sovereign-sdk = { path = "../sovereign/sdk" }
