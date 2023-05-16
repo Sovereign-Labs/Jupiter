@@ -84,6 +84,7 @@ async fn fetch_needed_shares_by_header(
 
     Ok((rollup_shares, tx_data))
 }
+
 /// Runtime configuration for the DA service
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct DaServiceConfig {
@@ -106,15 +107,15 @@ fn default_max_response_size() -> u32 {
 }
 
 impl DaService for CelestiaService {
-    type FilteredBlock = FilteredCelestiaBlock;
+    type RuntimeConfig = DaServiceConfig;
 
     type Spec = CelestiaSpec;
 
-    type Future<T> = Pin<Box<dyn Future<Output = Result<T, Self::Error>>>>;
+    type FilteredBlock = FilteredCelestiaBlock;
+
+    type Future<T> = Pin<Box<dyn Future<Output=Result<T, Self::Error>>>>;
 
     type Error = BoxError;
-
-    type RuntimeConfig = DaServiceConfig;
 
     fn new(config: Self::RuntimeConfig, chain_params: RollupParams) -> Self {
         let client = {
@@ -130,7 +131,7 @@ impl DaService for CelestiaService {
                 .max_request_body_size(config.max_celestia_response_body_size) // 100 MB
                 .build(&config.celestia_rpc_address)
         }
-        .expect("Client initialization is valid");
+            .expect("Client initialization is valid");
 
         Self::with_client(client, chain_params.namespace)
     }
@@ -174,7 +175,7 @@ impl DaService for CelestiaService {
                 &dah,
                 data_square.rows()?.into_iter(),
             )
-            .await?;
+                .await?;
 
             info!("Decoding pfb protofbufs...");
             // Parse out the pfds and store them for later retrieval
@@ -245,12 +246,24 @@ impl DaService for CelestiaService {
 
         (relevant_txs, etx_proofs.0, rollup_row_proofs.0)
     }
+
+    fn send_transaction(&self, blob: &[u8]) -> <Self as DaService>::Future<()> {
+        // https://node-rpc-docs.celestia.org/
+        let client = self.client.clone();
+        // let rollup_namespace = self.rollup_namespace.clone();
+        Box::pin(async move {
+            let _response = client
+                .request::<serde_json::Value, _>("state.SubmitTx", vec![blob])
+                .await?;
+            Ok::<(), BoxError>()
+        })
+    }
 }
 
 async fn get_rows_containing_namespace(
     nid: NamespaceId,
     dah: &DataAvailabilityHeader,
-    data_square_rows: impl Iterator<Item = &[Share]>,
+    data_square_rows: impl Iterator<Item=&[Share]>,
 ) -> Result<Vec<Row>, BoxError> {
     let mut output = vec![];
 
@@ -271,6 +284,7 @@ mod tests {
         parse_pfb_namespace,
         shares::{NamespaceGroup, Share},
     };
+
     const SERIALIZED_PFB_SHARES: &'static str = r#"["AAAAAAAAAAQBAAABRQAAABHDAgq3AgqKAQqHAQogL2NlbGVzdGlhLmJsb2IudjEuTXNnUGF5Rm9yQmxvYnMSYwovY2VsZXN0aWExemZ2cnJmYXE5dWQ2Zzl0NGt6bXNscGYyNHlzYXhxZm56ZWU1dzkSCHNvdi10ZXN0GgEoIiCB8FoaUuOPrX2wFBbl4MnWY3qE72tns7sSY8xyHnQtr0IBABJmClAKRgofL2Nvc21vcy5jcnlwdG8uc2VjcDI1NmsxLlB1YktleRIjCiEDmXaTf6RVIgUVdG0XZ6bqecEn8jWeAi+LjzTis5QZdd4SBAoCCAEYARISCgwKBHV0aWESBDIwMDAQgPEEGkAhq2CzD1DqxsVXIriANXYyLAmJlnnt8YTNXiwHgMQQGUbl65QUe37UhnbNVrOzDVYK/nQV9TgI+5NetB2JbIz6EgEBGgRJTkRYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]"#;
     const SERIALIZED_ROLLUP_DATA_SHARES: &'static str = r#"["c292LXRlc3QBAAAAKHsia2V5IjogInRlc3RrZXkiLCAidmFsdWUiOiAidGVzdHZhbHVlIn0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]"#;
 
