@@ -86,7 +86,7 @@ async fn fetch_needed_shares_by_header(
 }
 
 /// Runtime configuration for the DA service
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct DaServiceConfig {
     /// The jwt used to authenticate with the Celestia rpc server
     pub celestia_rpc_auth_token: String,
