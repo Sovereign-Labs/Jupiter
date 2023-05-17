@@ -87,7 +87,7 @@ async fn fetch_needed_shares_by_header(
 }
 
 /// Runtime configuration for the DA service
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct DaServiceConfig {
     /// The jwt used to authenticate with the Celestia rpc server
     pub celestia_rpc_auth_token: String,
@@ -98,8 +98,6 @@ pub struct DaServiceConfig {
     #[serde(default = "default_max_response_size")]
     pub max_celestia_response_body_size: u32,
 }
-
-impl FromTomlFile for DaServiceConfig {}
 
 fn default_rpc_addr() -> String {
     "http://localhost:11111/".into()
