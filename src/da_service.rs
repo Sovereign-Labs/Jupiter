@@ -25,6 +25,7 @@ use crate::{
     },
     BlobWithSender, CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader,
 };
+use crate::utils::FromTomlFile;
 
 #[derive(Debug, Clone)]
 pub struct CelestiaService {
@@ -97,6 +98,8 @@ pub struct DaServiceConfig {
     #[serde(default = "default_max_response_size")]
     pub max_celestia_response_body_size: u32,
 }
+
+impl FromTomlFile for DaServiceConfig {}
 
 fn default_rpc_addr() -> String {
     "http://localhost:11111/".into()
