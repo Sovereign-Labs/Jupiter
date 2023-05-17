@@ -79,6 +79,12 @@ pub struct FilteredCelestiaBlock {
 }
 
 impl SlotData for FilteredCelestiaBlock {
+    type BlockHeader = CelestiaHeader;
+
+    fn header(&self) -> &Self::BlockHeader {
+        &self.header
+    }
+
     fn hash(&self) -> [u8; 32] {
         match self.header.header.hash() {
             tendermint::Hash::Sha256(h) => h,
