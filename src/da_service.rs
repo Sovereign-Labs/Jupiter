@@ -25,7 +25,6 @@ use crate::{
     },
     BlobWithSender, CelestiaHeader, CelestiaHeaderResponse, DataAvailabilityHeader,
 };
-use crate::utils::FromTomlFile;
 
 #[derive(Debug, Clone)]
 pub struct CelestiaService {
