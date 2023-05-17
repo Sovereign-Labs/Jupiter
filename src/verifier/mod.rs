@@ -1,6 +1,6 @@
 use nmt_rs::NamespaceId;
 use serde::{Deserialize, Serialize};
-use sovereign_sdk::{
+use sovereign_core::{
     da::{self, BlobTransactionTrait, BlockHashTrait as BlockHash, DaSpec},
     Bytes,
 };

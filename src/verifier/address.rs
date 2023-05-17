@@ -1,6 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use sovereign_sdk::core::traits::AddressTrait;
+use sovereign_core::traits::AddressTrait;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, PartialEq, Clone, Eq, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
