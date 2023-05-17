@@ -113,7 +113,7 @@ impl DaService for CelestiaService {
 
     type FilteredBlock = FilteredCelestiaBlock;
 
-    type Future<T> = Pin<Box<dyn Future<Output=Result<T, Self::Error>>>>;
+    type Future<T> = Pin<Box<dyn Future<Output = Result<T, Self::Error>>>>;
 
     type Error = BoxError;
 
@@ -131,7 +131,7 @@ impl DaService for CelestiaService {
                 .max_request_body_size(config.max_celestia_response_body_size) // 100 MB
                 .build(&config.celestia_rpc_address)
         }
-            .expect("Client initialization is valid");
+        .expect("Client initialization is valid");
 
         Self::with_client(client, chain_params.namespace)
     }
@@ -175,7 +175,7 @@ impl DaService for CelestiaService {
                 &dah,
                 data_square.rows()?.into_iter(),
             )
-                .await?;
+            .await?;
 
             info!("Decoding pfb protofbufs...");
             // Parse out the pfds and store them for later retrieval
@@ -250,12 +250,14 @@ impl DaService for CelestiaService {
     fn send_transaction(&self, blob: &[u8]) -> <Self as DaService>::Future<()> {
         // https://node-rpc-docs.celestia.org/
         let client = self.client.clone();
-        // let rollup_namespace = self.rollup_namespace.clone();
+        info!("Sending {} bytes of raw data to Celestia.", blob.len());
+        // Take ownership of the blob so that the future is 'static.
+        let blob = blob.to_vec();
         Box::pin(async move {
             let _response = client
                 .request::<serde_json::Value, _>("state.SubmitTx", vec![blob])
                 .await?;
-            Ok::<(), BoxError>()
+            Ok::<(), BoxError>(())
         })
     }
 }
@@ -263,7 +265,7 @@ impl DaService for CelestiaService {
 async fn get_rows_containing_namespace(
     nid: NamespaceId,
     dah: &DataAvailabilityHeader,
-    data_square_rows: impl Iterator<Item=&[Share]>,
+    data_square_rows: impl Iterator<Item = &[Share]>,
 ) -> Result<Vec<Row>, BoxError> {
     let mut output = vec![];
 
