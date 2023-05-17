@@ -25,7 +25,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"], optional = true }
 tracing = "0.1.37"
 
-sovereign-sdk = { git = "https://github.com/Sovereign-Labs/sovereign.git", rev = "04d1591b4568cdfbebaa05eeee020c811080a9af" }
+sovereign-core = { git = "https://github.com/Sovereign-Labs/sovereign.git", branch = "research" }
 nmt-rs = { git = "https://github.com/Sovereign-Labs/nmt-rs.git", rev = "dd37588444fca72825d11fe4a46838f66525c49f", features = ["serde", "borsh"] }
 
 [dev-dependencies]
